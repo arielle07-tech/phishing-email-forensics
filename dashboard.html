@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phishing Email Forensics — SOC Dashboard</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --bg2: #111827;
+    --bg3: #1e293b;
+    --bg4: #334155;
+    --accent: #00d4ff;
+    --accent2: #06b6d4;
+    --accent-glow: rgba(0,212,255,.15);
+    --danger: #ef4444;
+    --danger-glow: rgba(239,68,68,.15);
+    --warning: #f59e0b;
+    --warning-glow: rgba(245,158,11,.15);
+    --success: #22c55e;
+    --success-glow: rgba(34,197,94,.15);
+    --info: #3b82f6;
+    --purple: #a855f7;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --text3: #64748b;
+    --border: #1e293b;
+    --border2: #334155;
+    --radius: 12px;
+    --glow: 0 0 20px rgba(0,212,255,.08);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(135deg, var(--bg2) 0%, var(--bg3) 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+  }
+
+  .header-left { display:flex; align-items:center; gap:16px; }
+
+  .logo {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--info));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    box-shadow: 0 0 20px rgba(0,212,255,.3);
+  }
+
+  .header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+  .header h1 span { color: var(--accent); }
+  .header-sub { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 2px; margin-top: 2px; }
+
+  .header-actions { display: flex; gap: 10px; align-items: center; }
+
+  .threat-indicator {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px; border-radius: 20px;
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 1px;
+    animation: pulse-border 2s ease-in-out infinite;
+  }
+  .threat-indicator .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    animation: pulse-dot 1.5s ease-in-out infinite;
+  }
+  .threat-indicator.critical { background: var(--danger-glow); color: var(--danger); border: 1px solid rgba(239,68,68,.3); }
+  .threat-indicator.critical .dot { background: var(--danger); }
+  .threat-indicator.high { background: var(--warning-glow); color: var(--warning); border: 1px solid rgba(245,158,11,.3); }
+  .threat-indicator.high .dot { background: var(--warning); }
+  .threat-indicator.medium { background: rgba(59,130,246,.15); color: var(--info); border: 1px solid rgba(59,130,246,.3); }
+  .threat-indicator.medium .dot { background: var(--info); }
+  .threat-indicator.low, .threat-indicator.info { background: var(--success-glow); color: var(--success); border: 1px solid rgba(34,197,94,.3); }
+  .threat-indicator.low .dot, .threat-indicator.info .dot { background: var(--success); }
+
+  @keyframes pulse-dot { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.4; transform:scale(.7); } }
+  @keyframes pulse-border { 0%,100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: var(--glow); } }
+  @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes countUp { from { opacity:0; } to { opacity:1; } }
+
+  .btn {
+    padding: 8px 18px; border-radius: 8px;
+    border: 1px solid var(--border2);
+    background: var(--bg3); color: var(--text);
+    cursor: pointer; font-size: 13px;
+    transition: all .2s;
+    font-weight: 500;
+  }
+  .btn:hover { background: var(--bg4); border-color: var(--accent); color: var(--accent); }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), var(--info));
+    color: #fff; border: none; font-weight: 700;
+    box-shadow: 0 4px 15px rgba(0,212,255,.25);
+  }
+  .btn-primary:hover { box-shadow: 0 4px 25px rgba(0,212,255,.4); transform: translateY(-1px); }
+
+  /* ── Container ── */
+  .container { padding: 24px 32px; max-width: 1500px; margin: 0 auto; }
+
+  /* ── Stat Cards ── */
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 28px; }
+  @media(max-width:1100px) { .stats { grid-template-columns: repeat(3, 1fr); } }
+  @media(max-width:600px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+
+  .stat-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: all .3s;
+    animation: fadeInUp .5s ease-out both;
+  }
+  .stat-card:nth-child(2) { animation-delay: .05s; }
+  .stat-card:nth-child(3) { animation-delay: .1s; }
+  .stat-card:nth-child(4) { animation-delay: .15s; }
+  .stat-card:nth-child(5) { animation-delay: .2s; }
+  .stat-card:hover { border-color: var(--border2); transform: translateY(-2px); box-shadow: var(--glow); }
+  .stat-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; }
+  .stat-card.critical::before { background: linear-gradient(90deg, var(--danger), transparent); }
+  .stat-card.high::before { background: linear-gradient(90deg, var(--warning), transparent); }
+  .stat-card.medium::before { background: linear-gradient(90deg, var(--info), transparent); }
+  .stat-card.safe::before { background: linear-gradient(90deg, var(--success), transparent); }
+  .stat-card.total::before { background: linear-gradient(90deg, var(--accent), transparent); }
+
+  .stat-icon { font-size: 28px; margin-bottom: 12px; opacity: .8; }
+  .stat-value { font-size: 32px; font-weight: 800; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+  .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+
+  /* ── Panels ── */
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  @media(max-width:900px) { .panels { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color .3s;
+    animation: fadeInUp .5s ease-out both;
+  }
+  .panel:hover { border-color: var(--border2); }
+
+  .panel-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600; font-size: 13px;
+    display: flex; align-items: center; gap: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text2);
+  }
+  .panel-header .icon { font-size: 16px; }
+  .panel-body { padding: 20px; }
+
+  /* ── Verdict ── */
+  .verdict-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 16px; border-radius: 20px;
+    font-size: 13px; font-weight: 800;
+    letter-spacing: 1.5px;
+  }
+  .verdict-badge.CRITICAL { background: var(--danger-glow); color: var(--danger); border: 1px solid rgba(239,68,68,.3); }
+  .verdict-badge.HIGH { background: var(--warning-glow); color: var(--warning); border: 1px solid rgba(245,158,11,.3); }
+  .verdict-badge.MEDIUM { background: rgba(59,130,246,.15); color: var(--info); border: 1px solid rgba(59,130,246,.3); }
+  .verdict-badge.LOW { background: var(--success-glow); color: var(--success); border: 1px solid rgba(34,197,94,.3); }
+  .verdict-badge.INFO { background: rgba(100,116,139,.15); color: var(--text3); border: 1px solid rgba(100,116,139,.3); }
+
+  /* ── Score Ring ── */
+  .score-ring { position: relative; width: 160px; height: 160px; margin: 0 auto 16px; }
+  .score-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .score-ring .value {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    font-size: 40px; font-weight: 800;
+  }
+  .score-ring .label {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 2px;
+  }
+
+  /* ── Auth ── */
+  .auth-row { display:flex; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); gap: 12px; }
+  .auth-row:last-child { border-bottom:none; }
+  .auth-label { width:70px; font-weight:700; font-size:13px; color: var(--text2); }
+  .auth-status {
+    padding: 4px 12px; border-radius: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  }
+  .auth-status.pass { background: var(--success-glow); color: var(--success); }
+  .auth-status.fail, .auth-status.softfail { background: var(--danger-glow); color: var(--danger); }
+  .auth-status.absent, .auth-status.none { background: rgba(100,116,139,.15); color: var(--text3); }
+  .auth-detail { font-size: 11px; color: var(--text3); flex: 1; margin-left: 12px; }
+
+  /* ── IOC ── */
+  .ioc-list { max-height: 350px; overflow-y: auto; }
+  .ioc-item {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    font-size: 13px; display: flex; align-items: center; gap: 10px;
+    transition: background .2s;
+  }
+  .ioc-item:last-child { border-bottom: none; }
+  .ioc-item:hover { background: rgba(255,255,255,.02); }
+  .ioc-type {
+    font-size: 10px; padding: 3px 8px; border-radius: 4px;
+    background: var(--bg3); color: var(--accent); font-weight: 700;
+    letter-spacing: 0.5px; min-width: 40px; text-align: center;
+  }
+  .ioc-value { font-family: 'Cascadia Code','Fira Code','Consolas',monospace; word-break: break-all; flex: 1; font-size: 12px; }
+  .ioc-flag { color: var(--danger); font-size: 11px; font-weight: 600; white-space: nowrap; }
+
+  /* ── Factors ── */
+  .factor {
+    padding: 10px 14px; margin-bottom: 8px;
+    background: var(--bg3); border-radius: 8px;
+    font-size: 13px; border-left: 3px solid var(--warning);
+    transition: transform .2s;
+  }
+  .factor:hover { transform: translateX(4px); }
+
+  /* ── Headers table ── */
+  .header-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+  .header-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .header-table td:first-child { color: var(--accent); font-weight: 600; white-space: nowrap; width: 120px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .header-table tr:last-child td { border-bottom: none; }
+
+  /* ── Attachments ── */
+  .att-card { background: var(--bg3); border-radius: 10px; padding: 16px; margin-bottom: 10px; border: 1px solid var(--border); }
+  .att-name { font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .att-name .suspicious { color: var(--danger); font-size: 10px; font-weight: 800; padding: 2px 8px; background: var(--danger-glow); border-radius: 4px; letter-spacing: 0.5px; }
+  .att-meta { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+  .att-hash { font-family: monospace; font-size: 11px; color: var(--text3); word-break: break-all; }
+
+  /* ── Anomalies ── */
+  .anomaly {
+    padding: 10px 14px; margin-bottom: 8px;
+    background: var(--danger-glow); border-radius: 8px;
+    font-size: 13px; border-left: 3px solid var(--danger);
+    color: #fca5a5;
+  }
+
+  /* ── Keywords ── */
+  .keyword-tag {
+    display: inline-block; padding: 4px 10px; margin: 3px;
+    border-radius: 6px; font-size: 11px; font-weight: 600;
+    background: var(--warning-glow); color: var(--warning);
+    border: 1px solid rgba(245,158,11,.2);
+  }
+
+  /* ── Upload ── */
+  .upload-area {
+    border: 2px dashed var(--border2); border-radius: 16px;
+    padding: 80px 40px; text-align: center;
+    cursor: pointer; transition: all .3s; margin-bottom: 24px;
+    background: linear-gradient(135deg, rgba(0,212,255,.02), rgba(59,130,246,.02));
+  }
+  .upload-area:hover, .upload-area.dragover {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, rgba(0,212,255,.05), rgba(59,130,246,.05));
+    box-shadow: 0 0 40px rgba(0,212,255,.08);
+  }
+  .upload-icon { font-size: 56px; margin-bottom: 20px; opacity: .6; }
+  .upload-text { font-size: 15px; color: var(--text2); line-height: 1.8; }
+  .upload-text strong { color: var(--text); font-size: 17px; }
+
+  /* ── Full width ── */
+  .full-width { grid-column: 1 / -1; }
+
+  /* ── AI Section ── */
+  .ai-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 6px;
+    font-size: 10px; font-weight: 700;
+    background: linear-gradient(135deg, rgba(0,212,255,.15), rgba(168,85,247,.15));
+    color: var(--accent); border: 1px solid rgba(0,212,255,.2);
+    letter-spacing: 0.5px;
+  }
+
+  .ai-meta-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  @media(max-width:700px) { .ai-meta-row { grid-template-columns: repeat(2, 1fr); } }
+
+  .ai-meta-item {
+    background: var(--bg3); border-radius: 10px; padding: 16px; text-align: center;
+    border: 1px solid var(--border); transition: all .3s;
+  }
+  .ai-meta-item:hover { border-color: var(--border2); }
+  .ai-meta-value { font-size: 22px; font-weight: 800; color: var(--accent); }
+  .ai-meta-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 6px; font-weight: 600; }
+
+  /* ── Tactics ── */
+  .tactic-card {
+    background: var(--bg3); border-radius: 10px; padding: 16px; margin-bottom: 10px;
+    border-left: 3px solid var(--warning); border: 1px solid var(--border);
+    border-left: 3px solid var(--warning);
+    transition: all .3s;
+  }
+  .tactic-card:hover { border-color: var(--border2); transform: translateX(4px); }
+  .tactic-name { font-weight: 800; font-size: 14px; }
+  .tactic-detail { font-size: 12px; color: var(--text2); margin-top: 6px; line-height: 1.5; }
+  .tactic-eff {
+    display: inline-block; padding: 3px 10px; border-radius: 6px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  }
+  .tactic-eff.high { background: var(--danger-glow); color: var(--danger); }
+  .tactic-eff.medium { background: var(--warning-glow); color: var(--warning); }
+  .tactic-eff.low { background: var(--success-glow); color: var(--success); }
+
+  /* ── Sophistication ── */
+  .soph-bar { height: 6px; border-radius: 3px; background: var(--bg); margin: 10px 0; overflow: hidden; }
+  .soph-fill { height: 100%; border-radius: 3px; transition: width 1s ease-out; }
+
+  /* ── MITRE ── */
+  .mitre-row {
+    display: flex; align-items: center; padding: 12px 16px;
+    border-bottom: 1px solid var(--border); font-size: 13px; gap: 16px;
+    transition: background .2s;
+  }
+  .mitre-row:last-child { border-bottom: none; }
+  .mitre-row:hover { background: rgba(255,255,255,.02); }
+  .mitre-id {
+    font-family: monospace; font-weight: 800; color: var(--accent);
+    min-width: 100px; font-size: 12px;
+    background: var(--accent-glow); padding: 4px 10px; border-radius: 6px;
+    text-align: center;
+  }
+  .mitre-name { font-weight: 700; min-width: 220px; font-size: 13px; }
+  .mitre-rel { color: var(--text2); flex: 1; font-size: 12px; }
+
+  /* ── Kill Chain ── */
+  .killchain {
+    display: flex; gap: 0; margin: 20px 0; overflow-x: auto;
+    padding: 10px 0;
+  }
+  .kc-phase {
+    flex: 1; min-width: 120px; text-align: center; padding: 16px 8px;
+    position: relative; transition: all .3s;
+  }
+  .kc-phase::after {
+    content: ''; position: absolute; right: -8px; top: 50%;
+    transform: translateY(-50%); width: 16px; height: 16px;
+    border-right: 2px solid var(--border2); border-top: 2px solid var(--border2);
+    transform: translateY(-50%) rotate(45deg); z-index: 1;
+  }
+  .kc-phase:last-child::after { display: none; }
+  .kc-phase .kc-icon { font-size: 24px; margin-bottom: 8px; }
+  .kc-phase .kc-name { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text2); }
+  .kc-phase .kc-count {
+    font-size: 18px; font-weight: 800; margin-top: 4px;
+  }
+  .kc-phase.active { color: var(--danger); }
+  .kc-phase.active .kc-name { color: var(--danger); }
+  .kc-phase.active .kc-icon { filter: drop-shadow(0 0 8px rgba(239,68,68,.4)); }
+  .kc-phase.inactive { opacity: .35; }
+
+  /* ── Radar Chart ── */
+  .radar-container { display: flex; justify-content: center; align-items: center; padding: 10px 0; }
+
+  /* ── Executive Summary ── */
+  .exec-summary {
+    font-size: 14px; line-height: 1.8; padding: 20px;
+    background: linear-gradient(135deg, var(--bg3), rgba(0,212,255,.03));
+    border-radius: 10px; border-left: 3px solid var(--accent);
+    color: var(--text);
+  }
+
+  .ai-provider {
+    font-size: 11px; color: var(--text3); margin-top: 16px;
+    text-align: right; font-style: italic;
+  }
+
+  /* ── Timeline ── */
+  .timeline { position: relative; padding: 20px 0; }
+  .timeline::before {
+    content: ''; position: absolute; left: 20px; top: 0; bottom: 0;
+    width: 2px; background: linear-gradient(180deg, var(--accent), var(--danger), var(--warning));
+  }
+  .tl-item { display: flex; gap: 20px; margin-bottom: 20px; position: relative; }
+  .tl-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--accent); background: var(--bg2);
+    margin-top: 4px; flex-shrink: 0; z-index: 1;
+    margin-left: 15px;
+  }
+  .tl-dot.danger { border-color: var(--danger); }
+  .tl-dot.warning { border-color: var(--warning); }
+  .tl-content { flex: 1; }
+  .tl-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  .tl-desc { font-size: 12px; color: var(--text2); line-height: 1.5; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+  /* ── Empty state ── */
+  .empty-state { text-align: center; padding: 40px; color: var(--text3); }
+  .empty-state .icon { font-size: 36px; margin-bottom: 12px; opacity: .4; }
+
+  /* ── Loading overlay ── */
+  .loading-overlay {
+    position: fixed; top:0; left:0; right:0; bottom:0;
+    background: rgba(10,14,23,.9); z-index: 200;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 20px;
+  }
+  .spinner {
+    width: 50px; height: 50px; border: 4px solid var(--border2);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { font-size: 16px; color: var(--text2); }
+  .loading-sub { font-size: 12px; color: var(--text3); }
+
+  /* ── Print ── */
+  @media print {
+    body { background: #fff; color: #1a1a1a; }
+    .header { position: static; }
+    .btn, .upload-area { display: none; }
+    .panel, .stat-card { break-inside: avoid; border-color: #ddd; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="logo">&#x1f6e1;</div>
+    <div>
+      <h1>Phishing Email <span>Forensics</span></h1>
+      <div class="header-sub">SOC Analysis Dashboard</div>
+    </div>
+  </div>
+  <div class="header-actions">
+    <div id="threatLevel"></div>
+    <input type="file" id="fileInput" accept=".json" style="display:none">
+    <input type="file" id="emlInput" accept=".eml" style="display:none">
+    <button class="btn" onclick="loadDemoFromAPI()">Demo IA</button>
+    <button class="btn" onclick="loadDemoData()">Demo Offline</button>
+    <button class="btn" onclick="window.print()">Export</button>
+    <button class="btn" onclick="document.getElementById('fileInput').click()">Importer JSON</button>
+    <button class="btn btn-primary" onclick="document.getElementById('emlInput').click()">&#x1f4e7; Analyser .eml</button>
+  </div>
+</div>
+
+<div class="container" id="app">
+  <div id="uploadArea" class="upload-area" onclick="document.getElementById('emlInput').click()" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+    <div class="upload-icon">&#x1f4e7;</div>
+    <div class="upload-text">
+      <strong>Cliquez ici ou glissez un fichier .eml</strong><br><br>
+      Analysez un email suspect directement depuis l'interface<br>
+      <span style="font-size:12px;color:var(--text3)">Formats acceptes : .eml (analyse IA) ou .json (rapport existant)</span>
+    </div>
+  </div>
+
+  <div id="dashboard" style="display:none">
+    <div class="stats" id="statsCards"></div>
+
+    <!-- Kill Chain -->
+    <div class="panel full-width" style="margin-bottom:20px" id="killchainSection" style="display:none">
+      <div class="panel-header"><span class="icon">&#x2694;</span> MITRE ATT&CK Kill Chain</div>
+      <div class="panel-body" id="killchainPanel"></div>
+    </div>
+
+    <div class="panels">
+      <div class="panel">
+        <div class="panel-header"><span class="icon">&#x1f3af;</span> Verdict & Score</div>
+        <div class="panel-body" id="verdictPanel"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><span class="icon">&#x1f512;</span> Authentification Email</div>
+        <div class="panel-body" id="authPanel"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><span class="icon">&#x1f50d;</span> Indicateurs de Compromission</div>
+        <div class="panel-body" id="iocPanel"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><span class="icon">&#x26a0;</span> Facteurs de Risque</div>
+        <div class="panel-body" id="factorsPanel"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><span class="icon">&#x1f4e7;</span> Informations Email</div>
+        <div class="panel-body" id="headersPanel"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><span class="icon">&#x1f4ce;</span> Pieces Jointes</div>
+        <div class="panel-body" id="attachmentsPanel"></div>
+      </div>
+
+      <div class="panel full-width">
+        <div class="panel-header"><span class="icon">&#x1f6a8;</span> Anomalies Detectees</div>
+        <div class="panel-body" id="anomaliesPanel"></div>
+      </div>
+
+      <!-- AI Panels -->
+      <div class="panel full-width" id="aiSection" style="display:none">
+        <div class="panel-header"><span class="icon">&#x1f9e0;</span> Analyse IA — Social Engineering <span class="ai-badge">AI POWERED</span></div>
+        <div class="panel-body" id="aiPanel"></div>
+      </div>
+
+      <div class="panel" id="aiRadarSection" style="display:none">
+        <div class="panel-header"><span class="icon">&#x1f4ca;</span> Radar Tactiques SE <span class="ai-badge">AI</span></div>
+        <div class="panel-body" id="aiRadarPanel"></div>
+      </div>
+
+      <div class="panel" id="aiTacticsSection" style="display:none">
+        <div class="panel-header"><span class="icon">&#x1f3ad;</span> Tactiques de Manipulation <span class="ai-badge">AI</span></div>
+        <div class="panel-body" id="aiTacticsPanel"></div>
+      </div>
+
+      <div class="panel" id="aiSophSection" style="display:none">
+        <div class="panel-header"><span class="icon">&#x1f4ca;</span> Sophistication & Ciblage <span class="ai-badge">AI</span></div>
+        <div class="panel-body" id="aiSophPanel"></div>
+      </div>
+
+      <div class="panel" id="aiTimelineSection" style="display:none">
+        <div class="panel-header"><span class="icon">&#x1f552;</span> Timeline d'Attaque <span class="ai-badge">AI</span></div>
+        <div class="panel-body" id="aiTimelinePanel"></div>
+      </div>
+
+      <div class="panel full-width" id="aiSummarySection" style="display:none">
+        <div class="panel-header"><span class="icon">&#x1f4dd;</span> Resume Executif IA <span class="ai-badge">AI</span></div>
+        <div class="panel-body" id="aiSummaryPanel"></div>
+      </div>
+
+      <div class="panel full-width" id="aiMitreSection" style="display:none">
+        <div class="panel-header"><span class="icon">&#x1f5fa;</span> Mapping MITRE ATT&CK <span class="ai-badge">AI</span></div>
+        <div class="panel-body" id="aiMitrePanel"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── File inputs ──
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try { renderReport(JSON.parse(ev.target.result)); }
+    catch(err) { alert("Erreur JSON: " + err.message); }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('emlInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (file) uploadEml(file);
+});
+
+function handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('dragover'); }
+function handleDragLeave(e) { e.currentTarget.classList.remove('dragover'); }
+function handleDrop(e) {
+  e.preventDefault(); e.currentTarget.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (file.name.toLowerCase().endsWith('.eml')) {
+    uploadEml(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try { renderReport(JSON.parse(ev.target.result)); }
+      catch(err) { alert("Erreur: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+}
+
+// ── Loading overlay ──
+function showLoading(msg, sub) {
+  const el = document.createElement('div');
+  el.id = 'loadingOverlay';
+  el.className = 'loading-overlay';
+  el.innerHTML = `<div class="spinner"></div><div class="loading-text">${msg || 'Analyse en cours...'}</div><div class="loading-sub">${sub || ''}</div>`;
+  document.body.appendChild(el);
+}
+function hideLoading() {
+  const el = document.getElementById('loadingOverlay');
+  if (el) el.remove();
+}
+
+// ── API calls ──
+function uploadEml(file) {
+  showLoading('Analyse en cours...', file.name + ' — IA + heuristiques');
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('ai', 'true');
+
+  fetch('/api/analyze', { method: 'POST', body: formData })
+    .then(r => {
+      if (!r.ok) return r.json().then(d => { throw new Error(d.error || 'Erreur serveur'); });
+      return r.json();
+    })
+    .then(data => { hideLoading(); renderReport(data); })
+    .catch(err => { hideLoading(); alert('Erreur: ' + err.message + '\n\nAssurez-vous que le serveur webapp.py est lancé.'); });
+}
+
+function loadDemoFromAPI() {
+  showLoading('Analyse demo en cours...', 'Génération + analyse IA');
+  fetch('/api/demo')
+    .then(r => {
+      if (!r.ok) return r.json().then(d => { throw new Error(d.error || 'Erreur serveur'); });
+      return r.json();
+    })
+    .then(data => { hideLoading(); renderReport(data); })
+    .catch(err => { hideLoading(); alert('Erreur: ' + err.message + '\n\nAssurez-vous que le serveur webapp.py est lancé.'); });
+}
+
+function renderReport(data) {
+  let analysis;
+  if (data.analyses && data.analyses.length > 0) analysis = data.analyses[0];
+  else if (data.metadata) analysis = data;
+  else { alert("Format de rapport non reconnu."); return; }
+
+  document.getElementById('uploadArea').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+
+  const level = (analysis.verdict || {}).risk_level || 'INFO';
+  document.getElementById('threatLevel').innerHTML =
+    `<div class="threat-indicator ${level.toLowerCase()}"><div class="dot"></div>THREAT: ${level}</div>`;
+
+  renderStats(analysis);
+  renderVerdict(analysis);
+  renderAuth(analysis);
+  renderIOCs(analysis);
+  renderFactors(analysis);
+  renderHeaders(analysis);
+  renderAttachments(analysis);
+  renderAnomalies(analysis);
+
+  if (analysis.ai_analysis && !analysis.ai_analysis.error) {
+    renderKillChain(analysis);
+    renderAI(analysis.ai_analysis);
+    renderRadar(analysis.ai_analysis);
+    renderAITactics(analysis.ai_analysis);
+    renderAISoph(analysis.ai_analysis);
+    renderTimeline(analysis);
+    renderAISummary(analysis.ai_analysis);
+    renderAIMitre(analysis.ai_analysis);
+  } else {
+    renderKillChain(analysis);
+  }
+}
+
+function renderStats(a) {
+  const iocs = a.iocs || {};
+  const v = a.verdict || {};
+  const score = v.score || 0;
+  const scoreColor = score >= 80 ? 'var(--danger)' : score >= 50 ? 'var(--warning)' : score >= 25 ? 'var(--info)' : 'var(--success)';
+
+  document.getElementById('statsCards').innerHTML = `
+    <div class="stat-card ${score >= 80 ? 'critical' : score >= 50 ? 'high' : 'safe'}">
+      <div class="stat-icon">&#x1f6a8;</div>
+      <div class="stat-value" style="color:${scoreColor}">${score}/100</div>
+      <div class="stat-label">Score de Risque</div>
+    </div>
+    <div class="stat-card total">
+      <div class="stat-icon">&#x1f517;</div>
+      <div class="stat-value" style="color:var(--accent)">${iocs.urls_count || 0}</div>
+      <div class="stat-label">URLs Extraites</div>
+    </div>
+    <div class="stat-card ${(iocs.suspicious_urls_count||0) > 0 ? 'critical' : 'safe'}">
+      <div class="stat-icon">&#x26a0;</div>
+      <div class="stat-value" style="color:${(iocs.suspicious_urls_count||0) > 0 ? 'var(--danger)' : 'var(--success)'}">${iocs.suspicious_urls_count || 0}</div>
+      <div class="stat-label">URLs Suspectes</div>
+    </div>
+    <div class="stat-card ${(iocs.keywords_count||0) > 3 ? 'high' : 'safe'}">
+      <div class="stat-icon">&#x1f50e;</div>
+      <div class="stat-value" style="color:var(--warning)">${iocs.keywords_count || 0}</div>
+      <div class="stat-label">Mots-cles Phishing</div>
+    </div>
+    <div class="stat-card ${(a.attachments||[]).length > 0 ? 'high' : 'safe'}">
+      <div class="stat-icon">&#x1f4ce;</div>
+      <div class="stat-value" style="color:${(a.attachments||[]).length > 0 ? 'var(--warning)' : 'var(--success)'}">${(a.attachments||[]).length}</div>
+      <div class="stat-label">Pieces Jointes</div>
+    </div>
+  `;
+}
+
+function renderVerdict(a) {
+  const v = a.verdict || {};
+  const score = v.score || 0;
+  const level = v.risk_level || 'INFO';
+  const colors = { CRITICAL:'#ef4444', HIGH:'#f59e0b', MEDIUM:'#3b82f6', LOW:'#22c55e', INFO:'#64748b' };
+  const color = colors[level] || colors.INFO;
+  const circumference = 2 * Math.PI * 65;
+  const offset = circumference * (1 - score / 100);
+
+  document.getElementById('verdictPanel').innerHTML = `
+    <div style="text-align:center">
+      <div class="score-ring">
+        <svg viewBox="0 0 160 160">
+          <circle cx="80" cy="80" r="65" fill="none" stroke="var(--bg3)" stroke-width="10"/>
+          <circle cx="80" cy="80" r="65" fill="none" stroke="${color}" stroke-width="10"
+            stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"
+            stroke-linecap="round" style="transition:stroke-dashoffset 1.5s ease-out"/>
+        </svg>
+        <div class="value" style="color:${color}">${score}</div>
+      </div>
+      <div class="verdict-badge ${level}">${level}</div>
+      <p style="margin-top:16px;font-size:13px;color:var(--text2);max-width:400px;margin-left:auto;margin-right:auto;line-height:1.6">${esc(v.summary || '')}</p>
+    </div>
+  `;
+}
+
+function renderAuth(a) {
+  const auth = a.authentication || {};
+  const cls = s => s==='pass'?'pass':(s==='fail'||s==='softfail')?'fail':'absent';
+  const icon = s => s==='pass'?'&#x2705;':(s==='fail'||s==='softfail')?'&#x274c;':'&#x2796;';
+  document.getElementById('authPanel').innerHTML = ['spf','dkim','dmarc'].map(key => {
+    const item = auth[key] || { status:'absent' };
+    return `<div class="auth-row">
+      <span style="font-size:16px">${icon(item.status)}</span>
+      <span class="auth-label">${key.toUpperCase()}</span>
+      <span class="auth-status ${cls(item.status)}">${item.status.toUpperCase()}</span>
+      <span class="auth-detail">${esc(item.details||'')}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderIOCs(a) {
+  const iocs = a.iocs || {};
+  let html = '';
+  const urls = iocs.urls || [];
+  if (urls.length > 0) {
+    html += '<div class="ioc-list">';
+    urls.forEach(u => {
+      const flags = [];
+      if (u.suspicious_tld) flags.push('TLD suspect');
+      if (u.ip_based) flags.push('IP directe');
+      if (u.url_shortener) flags.push('Shortener');
+      if (u.mismatched_display) flags.push('Lien trompeur');
+      html += `<div class="ioc-item">
+        <span class="ioc-type">URL</span>
+        <span class="ioc-value">${esc(u.url)}</span>
+        ${flags.length ? `<span class="ioc-flag">&#x26a0; ${flags.join(' | ')}</span>` : '<span style="color:var(--success);font-size:11px">OK</span>'}
+      </div>`;
+    });
+    html += '</div>';
+  }
+  const kws = iocs.phishing_keywords || [];
+  if (kws.length > 0) {
+    html += '<div style="margin-top:16px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-weight:600">Mots-cles phishing</div>';
+    kws.forEach(k => { html += `<span class="keyword-tag">${esc(k)}</span>`; });
+    html += '</div>';
+  }
+  if (!html) html = '<div class="empty-state"><div class="icon">&#x2705;</div>Aucun IOC detecte</div>';
+  document.getElementById('iocPanel').innerHTML = html;
+}
+
+function renderFactors(a) {
+  const factors = (a.risk_scoring || {}).factors || [];
+  if (!factors.length) {
+    document.getElementById('factorsPanel').innerHTML = '<div class="empty-state"><div class="icon">&#x2705;</div>Aucun facteur</div>';
+    return;
+  }
+  document.getElementById('factorsPanel').innerHTML = factors.map(f =>
+    `<div class="factor">${esc(f)}</div>`
+  ).join('');
+}
+
+function renderHeaders(a) {
+  const m = a.metadata || {};
+  const rows = [
+    ['De', m.from], ['A', m.to], ['Sujet', m.subject],
+    ['Date', m.date], ['Message-ID', m.message_id],
+    ['Reply-To', m.reply_to], ['Return-Path', m.return_path]
+  ].filter(r => r[1] && r[1] !== 'None' && r[1].trim());
+  document.getElementById('headersPanel').innerHTML = `<table class="header-table">${rows.map(r => `<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join('')}</table>`;
+}
+
+function renderAttachments(a) {
+  const atts = a.attachments || [];
+  if (!atts.length) { document.getElementById('attachmentsPanel').innerHTML = '<div class="empty-state"><div class="icon">&#x1f4ed;</div>Aucune piece jointe</div>'; return; }
+  document.getElementById('attachmentsPanel').innerHTML = atts.map(att => `
+    <div class="att-card">
+      <div class="att-name">&#x1f4c4; ${esc(att.filename)} ${att.suspicious_extension ? '<span class="suspicious">SUSPECT</span>' : ''}</div>
+      <div class="att-meta">Type: ${esc(att.content_type)} &middot; ${formatBytes(att.size_bytes)}</div>
+      <div class="att-hash">MD5: ${att.md5}</div>
+      <div class="att-hash">SHA256: ${att.sha256}</div>
+    </div>
+  `).join('');
+}
+
+function renderAnomalies(a) {
+  const anomalies = (a.headers_analysis || {}).anomalies || [];
+  if (!anomalies.length) { document.getElementById('anomaliesPanel').innerHTML = '<div class="empty-state"><div class="icon">&#x2705;</div>Aucune anomalie</div>'; return; }
+  document.getElementById('anomaliesPanel').innerHTML = anomalies.map(an =>
+    `<div class="anomaly">&#x26a0; ${esc(an)}</div>`
+  ).join('');
+}
+
+// ── Kill Chain ──
+function renderKillChain(a) {
+  document.getElementById('killchainSection').style.display = '';
+  const mitre = (a.ai_analysis || {}).mitre_techniques || [];
+  const phases = [
+    { id: 'recon', name: 'Reconnaissance', icon: '&#x1f50d;', techniques: ['T1598','T1593','T1592'] },
+    { id: 'weaponize', name: 'Weaponization', icon: '&#x2699;', techniques: ['T1608'] },
+    { id: 'delivery', name: 'Delivery', icon: '&#x1f4e7;', techniques: ['T1566'] },
+    { id: 'exploit', name: 'Exploitation', icon: '&#x1f4a5;', techniques: ['T1203','T1204'] },
+    { id: 'install', name: 'Installation', icon: '&#x1f4e5;', techniques: ['T1105'] },
+    { id: 'c2', name: 'Command & Control', icon: '&#x1f4e1;', techniques: ['T1071'] },
+    { id: 'action', name: 'Action', icon: '&#x1f3af;', techniques: ['T1078','T1110'] },
+  ];
+
+  const mitreIds = mitre.map(m => m.id ? m.id.split('.')[0] : '');
+  document.getElementById('killchainPanel').innerHTML = '<div class="killchain">' +
+    phases.map(p => {
+      const count = mitreIds.filter(id => p.techniques.some(t => id.startsWith(t))).length;
+      const active = count > 0 || (p.id === 'delivery' && (a.iocs||{}).urls_count > 0);
+      return `<div class="kc-phase ${active ? 'active' : 'inactive'}">
+        <div class="kc-icon">${p.icon}</div>
+        <div class="kc-name">${p.name}</div>
+        ${active ? `<div class="kc-count" style="color:var(--danger)">${count || '!'}</div>` : '<div class="kc-count" style="color:var(--text3)">-</div>'}
+      </div>`;
+    }).join('') + '</div>';
+}
+
+// ── AI ──
+function renderAI(ai) {
+  document.getElementById('aiSection').style.display = '';
+  const sem = ai.semantic_analysis || {};
+  const imp = ai.impersonation || {};
+  const confPct = Math.round((ai.ai_confidence || 0) * 100);
+
+  document.getElementById('aiPanel').innerHTML = `
+    <div class="ai-meta-row">
+      <div class="ai-meta-item">
+        <div class="ai-meta-value">${esc(sem.target_emotion || 'N/A')}</div>
+        <div class="ai-meta-label">Emotion Ciblee</div>
+      </div>
+      <div class="ai-meta-item">
+        <div class="ai-meta-value">${sem.credibility_assessment || 'N/A'}<span style="font-size:14px;color:var(--text3)">/10</span></div>
+        <div class="ai-meta-label">Credibilite</div>
+      </div>
+      <div class="ai-meta-item">
+        <div class="ai-meta-value">${sem.language_quality || 'N/A'}<span style="font-size:14px;color:var(--text3)">/10</span></div>
+        <div class="ai-meta-label">Qualite Linguistique</div>
+      </div>
+      <div class="ai-meta-item">
+        <div class="ai-meta-value">${confPct}<span style="font-size:14px;color:var(--text3)">%</span></div>
+        <div class="ai-meta-label">Confiance IA</div>
+      </div>
+    </div>
+    <table class="header-table">
+      <tr><td>Pretexte</td><td>${esc(sem.pretext || imp.pretext || 'N/A')}</td></tr>
+      <tr><td>Narrative</td><td>${esc(sem.narrative || 'N/A')}</td></tr>
+      <tr><td>Entite Usurpee</td><td>${esc(imp.impersonated_entity || 'N/A')} (qualite: ${imp.impersonation_quality || 'N/A'}/10)</td></tr>
+      ${(imp.red_flags||[]).length ? '<tr><td>Red Flags</td><td>' + (imp.red_flags||[]).map(f => '<div class="anomaly" style="margin:4px 0">' + esc(f) + '</div>').join('') + '</td></tr>' : ''}
+    </table>
+    <div class="ai-provider">Analyse par: ${esc((ai._meta||{}).provider||'unknown')} (${esc((ai._meta||{}).model||'')})</div>
+  `;
+}
+
+// ── Radar Chart ──
+function renderRadar(ai) {
+  const tactics = ai.social_engineering_tactics || [];
+  if (tactics.length < 3) return;
+  document.getElementById('aiRadarSection').style.display = '';
+
+  const labels = tactics.map(t => t.tactic || '?');
+  const values = tactics.map(t => t.effectiveness === 'high' ? 10 : t.effectiveness === 'medium' ? 6 : 3);
+  const n = labels.length;
+  const cx = 150, cy = 140, r = 100;
+
+  let gridSvg = '';
+  [0.25, 0.5, 0.75, 1].forEach(scale => {
+    let pts = [];
+    for (let i = 0; i < n; i++) {
+      const angle = (Math.PI * 2 * i / n) - Math.PI / 2;
+      pts.push(`${cx + r * scale * Math.cos(angle)},${cy + r * scale * Math.sin(angle)}`);
+    }
+    gridSvg += `<polygon points="${pts.join(' ')}" fill="none" stroke="#1e293b" stroke-width="1"/>`;
+  });
+
+  let dataPts = [], axisSvg = '', labelsSvg = '';
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i / n) - Math.PI / 2;
+    const val = values[i] / 10;
+    dataPts.push(`${cx + r * val * Math.cos(angle)},${cy + r * val * Math.sin(angle)}`);
+    axisSvg += `<line x1="${cx}" y1="${cy}" x2="${cx + r * Math.cos(angle)}" y2="${cy + r * Math.sin(angle)}" stroke="#334155" stroke-width="1"/>`;
+
+    const lx = cx + (r + 25) * Math.cos(angle);
+    const ly = cy + (r + 25) * Math.sin(angle);
+    const anchor = Math.abs(angle) < 0.1 || Math.abs(angle - Math.PI) < 0.1 ? 'middle' : Math.cos(angle) > 0 ? 'start' : 'end';
+    labelsSvg += `<text x="${lx}" y="${ly}" text-anchor="${anchor}" dominant-baseline="middle" fill="#94a3b8" font-size="11" font-weight="600">${esc(labels[i])}</text>`;
+  }
+
+  const svg = `<svg viewBox="0 0 300 290" xmlns="http://www.w3.org/2000/svg" style="max-width:340px">
+    ${gridSvg}${axisSvg}
+    <polygon points="${dataPts.join(' ')}" fill="rgba(0,212,255,.15)" stroke="#00d4ff" stroke-width="2"/>
+    ${dataPts.map(p => `<circle cx="${p.split(',')[0]}" cy="${p.split(',')[1]}" r="4" fill="#00d4ff"/>`).join('')}
+    ${labelsSvg}
+  </svg>`;
+
+  document.getElementById('aiRadarPanel').innerHTML = `<div class="radar-container">${svg}</div>`;
+}
+
+function renderAITactics(ai) {
+  const tactics = ai.social_engineering_tactics || [];
+  if (!tactics.length) return;
+  document.getElementById('aiTacticsSection').style.display = '';
+  document.getElementById('aiTacticsPanel').innerHTML = tactics.map(t => `
+    <div class="tactic-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="tactic-name">${esc(t.tactic || '?')}</span>
+        <span class="tactic-eff ${t.effectiveness || 'low'}">${(t.effectiveness || '?').toUpperCase()}</span>
+      </div>
+      <div class="tactic-detail">${esc(t.description || '')}</div>
+      <div class="tactic-detail" style="color:var(--purple)">Cialdini: ${esc(t.cialdini_principle || 'N/A')}</div>
+      ${(t.matched_indicators||[]).length ? '<div style="margin-top:6px">' + t.matched_indicators.map(i => '<span class="keyword-tag">' + esc(i) + '</span>').join('') + '</div>' : ''}
+    </div>
+  `).join('');
+}
+
+function renderAISoph(ai) {
+  const soph = ai.sophistication || {};
+  const targeting = ai.targeting || {};
+  if (!soph.level && !targeting.type) return;
+  document.getElementById('aiSophSection').style.display = '';
+
+  const sophColors = { amateur:'#22c55e', intermediate:'#f59e0b', advanced:'#ef4444', apt:'#a855f7' };
+  const sophColor = sophColors[soph.level] || '#64748b';
+  const sophPct = ((soph.score || 0) / 10) * 100;
+
+  let html = '';
+  if (soph.level) {
+    html += `<div style="margin-bottom:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <strong style="font-size:13px">Niveau de Sophistication</strong>
+        <span style="color:${sophColor};font-weight:800;text-transform:uppercase;font-size:13px;letter-spacing:1px">${soph.level} (${soph.score}/10)</span>
+      </div>
+      <div class="soph-bar"><div class="soph-fill" style="width:${sophPct}%;background:linear-gradient(90deg,${sophColor},${sophColor}88)"></div></div>
+      <div style="font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5">${esc(soph.likely_threat_actor_profile || '')}</div>
+    </div>`;
+    if ((soph.indicators||[]).length) {
+      soph.indicators.forEach(ind => { html += '<div class="factor" style="border-left-color:' + sophColor + '">' + esc(ind) + '</div>'; });
+    }
+  }
+  if (targeting.type) {
+    const targetColors = { mass:'#3b82f6', targeted:'#f59e0b', spear:'#ef4444', whaling:'#a855f7', bec:'#ef4444' };
+    html += `<div style="padding:16px;background:var(--bg3);border-radius:10px;margin-top:16px;border:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong style="font-size:13px">Ciblage</strong>
+        <span class="verdict-badge ${targeting.type==='mass'?'MEDIUM':'CRITICAL'}" style="color:${targetColors[targeting.type]||'#64748b'}">${(targeting.type||'?').toUpperCase()}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.5">${esc(targeting.reasoning || '')}</div>
+    </div>`;
+  }
+  document.getElementById('aiSophPanel').innerHTML = html;
+}
+
+// ── Timeline ──
+function renderTimeline(a) {
+  document.getElementById('aiTimelineSection').style.display = '';
+  const ai = a.ai_analysis || {};
+  const sem = ai.semantic_analysis || {};
+  const imp = ai.impersonation || {};
+  const tactics = ai.social_engineering_tactics || [];
+
+  const steps = [
+    { title: 'Reception de l\'email', desc: `De: ${esc((a.metadata||{}).from||'?')} | Sujet: ${esc((a.metadata||{}).subject||'?')}`, type: 'accent' },
+    { title: 'Usurpation d\'identite', desc: `Entite usurpee: ${esc(imp.impersonated_entity||'N/A')} — ${esc(sem.pretext||'')}`, type: 'warning' },
+    { title: 'Tactiques de manipulation', desc: tactics.map(t => t.tactic).join(', ') || 'Aucune detectee', type: 'warning' },
+    { title: 'Echec d\'authentification', desc: `SPF: ${((a.authentication||{}).spf||{}).status||'?'} | DKIM: ${((a.authentication||{}).dkim||{}).status||'?'} | DMARC: ${((a.authentication||{}).dmarc||{}).status||'?'}`, type: 'danger' },
+    { title: 'IOCs identifies', desc: `${(a.iocs||{}).urls_count||0} URLs, ${(a.iocs||{}).suspicious_urls_count||0} suspectes, ${(a.iocs||{}).ips_count||0} IPs`, type: 'danger' },
+    { title: 'Verdict final', desc: `Score: ${(a.verdict||{}).score||0}/100 — ${(a.verdict||{}).risk_level||'?'}`, type: 'danger' },
+  ];
+
+  document.getElementById('aiTimelinePanel').innerHTML = '<div class="timeline">' +
+    steps.map(s => `<div class="tl-item">
+      <div class="tl-dot ${s.type}"></div>
+      <div class="tl-content">
+        <div class="tl-title">${s.title}</div>
+        <div class="tl-desc">${s.desc}</div>
+      </div>
+    </div>`).join('') + '</div>';
+}
+
+function renderAISummary(ai) {
+  const summary = ai.executive_summary;
+  const recs = ai.recommended_actions || [];
+  const notes = ai.investigation_notes;
+  if (!summary && !recs.length) return;
+  document.getElementById('aiSummarySection').style.display = '';
+
+  let html = '';
+  if (summary) html += '<div class="exec-summary">' + esc(summary) + '</div>';
+  if (notes) html += '<div style="margin-top:14px;font-size:13px;color:var(--text2);padding:14px 16px;background:var(--bg3);border-radius:8px;line-height:1.6;border:1px solid var(--border)"><strong style="color:var(--text)">Notes investigation:</strong><br>' + esc(notes) + '</div>';
+  if (recs.length) {
+    html += '<div style="margin-top:20px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;font-weight:700">Actions Recommandees</div>';
+    recs.forEach((r, i) => { html += '<div class="factor" style="border-left-color:var(--accent)">' + (i+1) + '. ' + esc(r) + '</div>'; });
+    html += '</div>';
+  }
+  document.getElementById('aiSummaryPanel').innerHTML = html;
+}
+
+function renderAIMitre(ai) {
+  const mitre = ai.mitre_techniques || [];
+  if (!mitre.length) return;
+  document.getElementById('aiMitreSection').style.display = '';
+  document.getElementById('aiMitrePanel').innerHTML = mitre.map(m => `
+    <div class="mitre-row">
+      <span class="mitre-id">${esc(m.id || '')}</span>
+      <span class="mitre-name">${esc(m.name || '')}</span>
+      <span class="mitre-rel">${esc(m.relevance || '')}</span>
+    </div>
+  `).join('');
+}
+
+function esc(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const k = 1024, sizes = ['B','KB','MB','GB'];
+  const i = Math.floor(Math.log(bytes)/Math.log(k));
+  return parseFloat((bytes/Math.pow(k,i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// ── Demo ──
+function loadDemoData() {
+  const demo = {
+    "report_generated": "2026-06-28T12:00:00Z",
+    "total_emails_analyzed": 1,
+    "analyses": [{
+      "metadata": {
+        "file": "demo_phishing.eml",
+        "analysis_timestamp": "2026-06-28T12:00:00Z",
+        "subject": "[URGENT] Votre compte a été compromis - Action immédiate requise",
+        "from": "\"Service Securite\" <security-alert@update-secure-login.tk>",
+        "to": "victim@example.com",
+        "cc": "",
+        "date": "Sat, 28 Jun 2026 10:30:00 +0000",
+        "message_id": "<fake123@update-secure-login.tk>",
+        "reply_to": "no-reply@totallylegit.xyz",
+        "return_path": "<bouncer@different-domain.ml>"
+      },
+      "headers_analysis": {
+        "received_chain": [{"hop":1,"raw":"from [185.234.72.11] by mx.example.com","ips_found":["185.234.72.11"]}],
+        "total_hops": 1,
+        "from_address": "security-alert@update-secure-login.tk",
+        "return_path_address": "bouncer@different-domain.ml",
+        "reply_to_address": "no-reply@totallylegit.xyz",
+        "anomalies": [
+          "From (security-alert@update-secure-login.tk) ≠ Return-Path (bouncer@different-domain.ml)",
+          "From (security-alert@update-secure-login.tk) ≠ Reply-To (no-reply@totallylegit.xyz)"
+        ]
+      },
+      "authentication": {
+        "spf": {"status":"fail","details":"spf=fail smtp.mailfrom=update-secure-login.tk"},
+        "dkim": {"status":"fail","details":"dkim=fail header.d=update-secure-login.tk"},
+        "dmarc": {"status":"fail","details":"dmarc=fail header.from=update-secure-login.tk"}
+      },
+      "iocs": {
+        "urls": [
+          {"url":"http://185.234.72.11/phishing/steal.php","domain":"185.234.72.11","scheme":"http","suspicious_tld":false,"ip_based":true,"url_shortener":false,"mismatched_display":true,"display_text":"https://www.banque-securisee.com/verification"},
+          {"url":"http://bit.ly/3xF4k3Link","domain":"bit.ly","scheme":"http","suspicious_tld":false,"ip_based":false,"url_shortener":true,"mismatched_display":false}
+        ],
+        "urls_count": 2,
+        "suspicious_urls_count": 2,
+        "ips": [{"ip":"185.234.72.11","is_private":false}],
+        "ips_count": 1,
+        "domains": ["update-secure-login.tk","totallylegit.xyz","different-domain.ml","banque-securisee.com","bit.ly"],
+        "domains_count": 5,
+        "phishing_keywords": ["urgent","compromis","activité inhabituelle","vérifiez immédiatement","mot de passe expiré","suspendu","agissez maintenant","désactiver"],
+        "keywords_count": 8
+      },
+      "attachments": [{
+        "filename": "update_securite.exe",
+        "content_type": "application/x-msdownload",
+        "size_bytes": 44,
+        "md5": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "suspicious_extension": true
+      }],
+      "risk_scoring": {
+        "score": 96,
+        "max_score": 100,
+        "factors": [
+          "SPF fail/softfail (+15)",
+          "DKIM fail (+15)",
+          "DMARC fail (+10)",
+          "Anomalie header: From ≠ Return-Path (+10)",
+          "Anomalie header: From ≠ Reply-To (+8)",
+          "2 URL(s) suspecte(s) (+14)",
+          "1 lien(s) avec texte trompeur (+15)",
+          "8 mot(s)-clé(s) phishing (+15)",
+          "1 pièce(s) jointe(s) suspecte(s) (+10)"
+        ]
+      },
+      "verdict": {
+        "risk_level": "CRITICAL",
+        "score": 96,
+        "summary": "Très probablement du phishing — investigation immédiate recommandée",
+        "recommendation": "1. Ne pas cliquer sur les liens ni ouvrir les pièces jointes\n2. Isoler l'email et le transmettre à l'équipe SOC\n3. Vérifier si d'autres utilisateurs ont reçu le même email\n4. Bloquer les IOCs identifiés (domaines, IPs, URLs)\n5. Documenter l'incident dans le système de ticketing"
+      },
+      "ai_analysis": {
+        "semantic_analysis": {
+          "pretext": "Usurpation de service bancaire",
+          "narrative": "L'attaquant prétend que le compte de la victime a été compromis et usurpe un service bancaire pour obtenir des identifiants",
+          "target_emotion": "Urgence, Peur",
+          "credibility_assessment": 3,
+          "language_quality": 6
+        },
+        "social_engineering_tactics": [
+          {"tactic":"Urgence","description":"L'email crée un sentiment d'urgence pour pousser à l'action sans réflexion","cialdini_principle":"Rareté (Scarcity)","effectiveness":"high","matched_indicators":["urgent","immédiat","24h","expire"]},
+          {"tactic":"Autorité","description":"L'attaquant se fait passer pour une entité d'autorité","cialdini_principle":"Autorité (Authority)","effectiveness":"high","matched_indicators":["service sécurité","banque"]},
+          {"tactic":"Peur","description":"Exploite la peur de perdre l'accès au compte","cialdini_principle":"Aversion à la perte (Loss Aversion)","effectiveness":"high","matched_indicators":["compromis","suspendu","désactivation"]},
+          {"tactic":"Curiosité","description":"Attise la curiosité pour inciter au clic","cialdini_principle":"Engagement (Commitment)","effectiveness":"medium","matched_indicators":["vérifiez","cliquez"]}
+        ],
+        "sophistication": {
+          "level": "intermediate",
+          "score": 5,
+          "indicators": ["4 tactiques de SE combinées","Liens avec texte d'affichage trompeur","Extension exécutable directe (technique basique)"],
+          "likely_threat_actor_profile": "Acteur opportuniste avec compétences techniques modérées, probable utilisation de frameworks de phishing"
+        },
+        "targeting": {"type":"mass","confidence":"medium","reasoning":"Aucun indicateur de ciblage spécifique — probable campagne de masse"},
+        "impersonation": {
+          "impersonated_entity": "Service Bancaire / Finance",
+          "impersonation_quality": 2,
+          "red_flags": ["Domaine expéditeur avec TLD gratuit (.tk)","From, Reply-To et Return-Path utilisent 3 domaines différents"],
+          "pretext": "Compromission de compte bancaire"
+        },
+        "executive_summary": "Email de phishing de niveau CRITICAL (score 96/100) usurpant l'identité d'une institution bancaire. Les tactiques de social engineering utilisées incluent l'urgence, l'autorité et la peur — une combinaison classique mais efficace. Le niveau de sophistication est intermédiaire : liens trompeurs bien construits mais domaine d'envoi sur TLD gratuit (.tk). Une investigation immédiate et des actions de confinement sont recommandées.",
+        "investigation_notes": "Le SPF, DKIM et DMARC en échec confirment que l'email ne provient pas du domaine affiché. Les anomalies de headers renforcent la thèse du phishing. La combinaison de 4 tactiques de SE indique une attaque structurée.",
+        "recommended_actions": [
+          "Quarantaine immédiate de l'email dans toutes les boîtes de réception",
+          "Bloquer les IOCs identifiés sur le proxy, firewall et passerelle mail",
+          "Rechercher d'autres occurrences dans les logs de messagerie",
+          "Vérifier les logs proxy pour identifier les utilisateurs ayant cliqué",
+          "Alerter l'entité usurpée de la campagne en cours",
+          "Communiquer aux utilisateurs : ne pas répondre aux emails d'urgence artificielle"
+        ],
+        "mitre_techniques": [
+          {"id":"T1566.001","name":"Phishing: Spearphishing Attachment","relevance":"Pièce jointe exécutable (.exe) détectée"},
+          {"id":"T1566.002","name":"Phishing: Spearphishing Link","relevance":"2 URLs détectées dont un lien IP masqué"},
+          {"id":"T1608.005","name":"Stage Capabilities: Link Target","relevance":"Utilisation de bit.ly pour masquer la destination"},
+          {"id":"T1598","name":"Phishing for Information","relevance":"Tentative de collecte d'identifiants via credential harvesting"}
+        ],
+        "ai_confidence": 0.95,
+        "_meta": {"provider":"gemini","model":"gemini-2.5-flash","timestamp":"2026-06-28T12:00:00Z"}
+      }
+    }]
+  };
+  renderReport(demo);
+}
+</script>
+</body>
+</html>

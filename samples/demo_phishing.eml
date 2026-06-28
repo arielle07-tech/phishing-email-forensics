@@ -1,0 +1,39 @@
+From: "Service Securite" <security-alert@update-secure-login.tk>
+To: victim@example.com
+Subject: [URGENT] Votre compte a été compromis - Action immédiate requise
+Date: Thu, 26 Jun 2026 10:30:00 +0000
+Message-ID: <fake123@update-secure-login.tk>
+Reply-To: no-reply@totallylegit.xyz
+Return-Path: <bouncer@different-domain.ml>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary123"
+Authentication-Results: mx.example.com;
+    spf=fail smtp.mailfrom=update-secure-login.tk;
+    dkim=fail header.d=update-secure-login.tk;
+    dmarc=fail header.from=update-secure-login.tk
+Received: from [185.234.72.11] by mx.example.com
+
+--boundary123
+Content-Type: text/html; charset="utf-8"
+
+<html>
+<body>
+<p>Cher utilisateur,</p>
+<p>Nous avons détecté une <b>activité inhabituelle</b> sur votre compte.</p>
+<p>Votre mot de passe a expiré et votre compte sera <b>suspendu</b> dans 24h.</p>
+<p><b>Vérifiez immédiatement</b> votre identité en cliquant ci-dessous :</p>
+<p><a href="http://185.234.72.11/phishing/steal.php">https://www.banque-securisee.com/verification</a></p>
+<p>Vous pouvez aussi visiter : http://bit.ly/3xF4k3Link</p>
+<p>Agissez maintenant pour éviter la désactivation de votre compte.</p>
+<p>Cordialement,<br>Le Service Sécurité</p>
+</body>
+</html>
+
+--boundary123
+Content-Type: application/x-msdownload; name="update_securite.exe"
+Content-Disposition: attachment; filename="update_securite.exe"
+Content-Transfer-Encoding: base64
+
+TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+
+--boundary123--

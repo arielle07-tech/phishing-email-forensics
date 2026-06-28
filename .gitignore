@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Reports (generated at runtime)
+reports/*.json
+phishing_report.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log

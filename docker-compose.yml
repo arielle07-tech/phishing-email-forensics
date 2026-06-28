@@ -1,0 +1,43 @@
+# ============================================
+# Phishing Email Forensics — Docker Compose
+# ============================================
+# Usage:
+#   docker compose run analyzer samples/demo_phishing.eml
+#   docker compose run analyzer samples/demo_phishing.eml --ai
+#   docker compose run analyzer --demo
+#
+# Reports are written to ./reports/ on the host.
+# Drop .eml files in ./samples/ to analyze them.
+
+services:
+  analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: phishing-analyzer
+    volumes:
+      - ./samples:/app/samples
+      - ./reports:/app/reports
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+    # Override entrypoint args via: docker compose run analyzer <file.eml> [--ai]
+
+  # Dashboard — web app avec upload .eml et analyse IA
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: phishing-dashboard
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./samples:/app/samples
+      - ./reports:/app/reports
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+    entrypoint: ["python", "webapp.py"]
+    restart: unless-stopped

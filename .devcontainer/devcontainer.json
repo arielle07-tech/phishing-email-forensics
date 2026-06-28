@@ -1,0 +1,47 @@
+{
+  "name": "Phishing Email Forensics",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/app",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.analysis.typeCheckingMode": "basic",
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        },
+        "files.associations": {
+          "*.eml": "plaintext"
+        }
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
+        "charliermarsh.ruff",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+
+  "forwardPorts": [8080],
+  "postCreateCommand": "pip install --no-cache-dir -r requirements.txt 2>/dev/null; echo 'Ready!'",
+
+  "mounts": [
+    "source=${localWorkspaceFolder}/samples,target=/app/samples,type=bind",
+    "source=${localWorkspaceFolder}/reports,target=/app/reports,type=bind",
+    "source=${localWorkspaceFolder}/.env,target=/app/.env,type=bind"
+  ],
+
+  "runArgs": ["--env-file", "${localWorkspaceFolder}/.env"],
+
+  "remoteEnv": {
+    "PYTHONPATH": "/app"
+  }
+}
