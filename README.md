@@ -96,6 +96,8 @@ Le serveur Flask expose les endpoints suivants :
 | `/api/demo` | GET | Analyse de l'email demo |
 | `/api/reports` | GET | Liste des rapports |
 | `/api/reports/<file>` | GET | Telecharger un rapport |
+| `/api/report/pdf` | POST | Generer rapport d'incident PDF |
+| `/api/report/docx` | POST | Generer rapport d'incident DOCX |
 
 ## Stack technique
 

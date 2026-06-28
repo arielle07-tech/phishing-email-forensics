@@ -10,6 +10,10 @@ openai>=1.50.0           # OpenAI API (set OPENAI_API_KEY)
 flask>=3.0
 flask-cors>=4.0
 
+# === Report Generation ===
+reportlab>=4.0           # PDF incident reports
+python-docx>=1.0         # Word (.docx) incident reports
+
 # === Optional: Future Roadmap ===
 # v1.2 — Analyse visuelle
 # Pillow>=10.0

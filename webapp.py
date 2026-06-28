@@ -18,7 +18,7 @@ import sys
 import tempfile
 import traceback
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response
 from flask_cors import CORS
 
 # Ajouter le répertoire du projet au path
@@ -46,23 +46,33 @@ def analyze_email():
     Accepte: multipart/form-data avec champ 'file' (.eml)
     Retourne: JSON du rapport d'analyse
     """
-    if "file" not in request.files:
-        return jsonify({"error": "Aucun fichier fourni. Champ 'file' requis."}), 400
-
-    file = request.files["file"]
-    if not file.filename:
-        return jsonify({"error": "Nom de fichier vide."}), 400
-
-    if not file.filename.lower().endswith(".eml"):
-        return jsonify({"error": "Format non supporté. Seuls les fichiers .eml sont acceptés."}), 400
-
     use_ai = request.form.get("ai", "true").lower() in ("true", "1", "yes", "oui")
 
+    # Déterminer la source : fichier uploadé ou texte collé
+    file = request.files.get("file")
+    raw_text = request.form.get("text", "").strip()
+
+    if not file and not raw_text:
+        return jsonify({"error": "Aucune donnée fournie. Envoyez un fichier ou du texte brut."}), 400
+
     try:
-        # Sauvegarder le fichier temporairement
-        with tempfile.NamedTemporaryFile(suffix=".eml", delete=False, dir=REPORTS_DIR) as tmp:
-            file.save(tmp)
-            tmp_path = tmp.name
+        if raw_text:
+            # Texte brut collé — créer un .eml temporaire
+            with tempfile.NamedTemporaryFile(suffix=".eml", delete=False, dir=REPORTS_DIR, mode="w", encoding="utf-8") as tmp:
+                tmp.write(raw_text)
+                tmp_path = tmp.name
+            filename = "pasted_email"
+        else:
+            if not file.filename:
+                return jsonify({"error": "Nom de fichier vide."}), 400
+            ext = os.path.splitext(file.filename)[1].lower()
+            if ext not in (".eml", ".txt", ".msg"):
+                return jsonify({"error": f"Format '{ext}' non supporté. Formats acceptés : .eml, .txt, .msg"}), 400
+            # Sauvegarder le fichier temporairement (toujours en .eml pour le parser)
+            with tempfile.NamedTemporaryFile(suffix=".eml", delete=False, dir=REPORTS_DIR) as tmp:
+                file.save(tmp)
+                tmp_path = tmp.name
+            filename = os.path.splitext(file.filename)[0]
 
         # Lancer l'analyse
         analyzer = PhishingAnalyzer(tmp_path)
@@ -72,7 +82,7 @@ def analyze_email():
             return jsonify({"error": result.get("error", "Impossible d'analyser le fichier.")}), 500
 
         # Sauvegarder le rapport JSON
-        report_name = os.path.splitext(file.filename)[0] + "_report.json"
+        report_name = filename + "_report.json"
         report_path = os.path.join(REPORTS_DIR, report_name)
         report_data = {
             "report_generated": result.get("metadata", {}).get("analysis_timestamp", ""),
@@ -140,6 +150,50 @@ def get_report(filename):
     if not filename.endswith(".json"):
         return jsonify({"error": "Format invalide"}), 400
     return send_from_directory(REPORTS_DIR, filename)
+
+
+# ── Rapport d'incident SOC ──
+
+# Stocke la dernière analyse pour la génération de rapports
+_last_analysis = {}
+
+
+@app.route("/api/report/pdf", methods=["POST"])
+def generate_pdf():
+    """Génère un rapport d'incident SOC en PDF."""
+    try:
+        from scripts.report_generator import generate_pdf_report
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"error": "Données d'analyse manquantes."}), 400
+        pdf_bytes = generate_pdf_report(data)
+        return Response(
+            pdf_bytes,
+            mimetype="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=Rapport_Incident_Phishing.pdf"}
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"Erreur génération PDF: {str(e)}"}), 500
+
+
+@app.route("/api/report/docx", methods=["POST"])
+def generate_docx():
+    """Génère un rapport d'incident SOC en DOCX."""
+    try:
+        from scripts.report_generator import generate_docx_report
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"error": "Données d'analyse manquantes."}), 400
+        docx_bytes = generate_docx_report(data)
+        return Response(
+            docx_bytes,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": "attachment; filename=Rapport_Incident_Phishing.docx"}
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"Erreur génération DOCX: {str(e)}"}), 500
 
 
 if __name__ == "__main__":
