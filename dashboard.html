@@ -1473,10 +1473,11 @@ function openTicketDetail(id) {
         <label>Cree le</label>
         <input type="text" value="${new Date(t.created).toLocaleString('fr-FR')}" readonly style="color:var(--text3)">
       </div>
-      ${t.emailDate ? `<div class="ticket-field">
+      <div class="ticket-field">
         <label>Email envoye le</label>
-        <input type="text" value="${esc(t.emailDate)}" readonly style="color:var(--text3)">
-      </div>` : ''}
+        <input type="datetime-local" step="1" value="${t.emailDate ? new Date(t.emailDate).toISOString().slice(0,19) : ''}"
+          onchange="updateTicketField(${t.id},'emailDate',this.value)">
+      </div>
     </div>
     <div class="ticket-field">
       <label>Titre</label>
@@ -1611,7 +1612,7 @@ function openNewTicketModal() {
     </div>
     <div class="ticket-field">
       <label>Date email envoye</label>
-      <input type="text" id="newTicketEmailDate" placeholder="ex: 2026-06-29 14:30">
+      <input type="datetime-local" step="1" id="newTicketEmailDate">
     </div>
     <div class="ticket-field">
       <label>Description</label>
