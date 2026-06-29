@@ -40,4 +40,12 @@ services:
     environment:
       - PYTHONPATH=/app
     entrypoint: ["python", "webapp.py"]
+    networks:
+      - default
+      - rt-network
     restart: unless-stopped
+
+networks:
+  rt-network:
+    external: true
+    name: rt-docker_default

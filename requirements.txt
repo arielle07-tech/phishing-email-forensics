@@ -2,8 +2,9 @@
 # Core (v1.0) — stdlib only, no external deps required for basic analysis
 
 # === Optional: AI Providers ===
-anthropic>=0.39.0        # Claude API (set ANTHROPIC_API_KEY)
-openai>=1.50.0           # OpenAI API (set OPENAI_API_KEY)
+anthropic>=0.39.0,<1.0   # Claude API (set ANTHROPIC_API_KEY)
+openai>=1.50.0,<2.0      # OpenAI API (set OPENAI_API_KEY)
+jiter>=0.4.0,<1          # JSON parser (anthropic dependency)
 # Ollama: no pip package needed, uses HTTP API directly
 
 # === Web Dashboard ===

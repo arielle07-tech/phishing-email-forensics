@@ -1304,6 +1304,7 @@ function createTicket(opts) {
     analysisId: opts.analysisId || null,
     score: opts.score || 0,
     level: opts.level || 'INFO',
+    emailDate: opts.emailDate || '',
     comments: [],
     activity: [{
       time: new Date().toISOString(),
@@ -1341,7 +1342,8 @@ function createTicketFromAnalysis(analysisData, historyId) {
     priority: priorityMap[level] || 'medium',
     score: verdict.score || 0,
     level: level,
-    analysisId: historyId || null
+    analysisId: historyId || null,
+    emailDate: meta.date || ''
   });
   switchTab('tickets');
   openTicketDetail(ticket.id);
@@ -1408,6 +1410,7 @@ function renderTicketCard(t) {
     <div class="ticket-title">${esc(t.title.substring(0,80))}</div>
     <div class="ticket-meta">
       <span>${age}</span>
+      ${t.emailDate ? `<span>&#x1f4e7; ${esc(t.emailDate.substring(0,16))}</span>` : ''}
       ${t.assignee ? `<span>&#x1f464; ${esc(t.assignee)}</span>` : ''}
       ${commentCount ? `<span>&#x1f4ac; ${commentCount}</span>` : ''}
     </div>
@@ -1470,6 +1473,10 @@ function openTicketDetail(id) {
         <label>Cree le</label>
         <input type="text" value="${new Date(t.created).toLocaleString('fr-FR')}" readonly style="color:var(--text3)">
       </div>
+      ${t.emailDate ? `<div class="ticket-field">
+        <label>Email envoye le</label>
+        <input type="text" value="${esc(t.emailDate)}" readonly style="color:var(--text3)">
+      </div>` : ''}
     </div>
     <div class="ticket-field">
       <label>Titre</label>
@@ -1603,6 +1610,10 @@ function openNewTicketModal() {
       </div>
     </div>
     <div class="ticket-field">
+      <label>Date email envoye</label>
+      <input type="text" id="newTicketEmailDate" placeholder="ex: 2026-06-29 14:30">
+    </div>
+    <div class="ticket-field">
       <label>Description</label>
       <textarea id="newTicketDesc" rows="4" placeholder="Decrivez l'incident..."></textarea>
     </div>
@@ -1620,7 +1631,8 @@ function submitNewTicket() {
     title,
     description: document.getElementById('newTicketDesc').value.trim(),
     priority: document.getElementById('newTicketPriority').value,
-    assignee: document.getElementById('newTicketAssignee').value.trim()
+    assignee: document.getElementById('newTicketAssignee').value.trim(),
+    emailDate: document.getElementById('newTicketEmailDate').value.trim()
   });
   closeTicketModal();
 }

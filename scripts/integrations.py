@@ -97,8 +97,10 @@ class BaseConnector:
 
 class RTIRConnector(BaseConnector):
     """
-    Connecteur RTIR via RT REST2 API.
-    Config requise: url, token (ou user/password)
+    Connecteur RTIR via RT REST1 API (/REST/1.0/).
+    REST1 utilise l'authentification par formulaire (user/pass en POST).
+    Les réponses sont en texte plat (clé: valeur), pas en JSON.
+    Config requise: url, user, password
     """
 
     name = "rtir"
@@ -106,102 +108,201 @@ class RTIRConnector(BaseConnector):
 
     def __init__(self, config: dict):
         super().__init__(config)
-        self.token = config.get("token", "")
         self.user = config.get("user", "")
         self.password = config.get("password", "")
 
-    def _auth_headers(self) -> dict:
-        if self.token:
-            return {"Authorization": f"token {self.token}"}
-        elif self.user and self.password:
-            creds = b64encode(f"{self.user}:{self.password}".encode()).decode()
-            return {"Authorization": f"Basic {creds}"}
-        return {}
+    def _rt_request(self, path: str, post_data: dict = None) -> str:
+        """Envoie une requête REST1 avec authentification par formulaire.
+        Retourne le body brut (texte) de la réponse.
+        """
+        url = f"{self.base_url}{path}"
+        # Toujours inclure les credentials
+        form = {"user": self.user, "pass": self.password}
+        if post_data:
+            form.update(post_data)
 
-    def _request(self, method, path, data=None, headers=None):
-        hdrs = self._auth_headers()
-        if headers:
-            hdrs.update(headers)
-        return super()._request(method, path, data, hdrs)
+        body = urllib.parse.urlencode(form).encode("utf-8")
+        req = urllib.request.Request(url, data=body)
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+        try:
+            with urllib.request.urlopen(req, context=self._ctx, timeout=15) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            return f"RT/error {e.code} {e.read().decode('utf-8', errors='replace')[:500]}"
+        except urllib.error.URLError as e:
+            return f"RT/error 0 Connection failed: {str(e.reason)}"
+        except Exception as e:
+            return f"RT/error 0 {str(e)}"
+
+    def _parse_rt_response(self, raw: str) -> dict:
+        """Parse une réponse REST1 (format texte clé: valeur).
+        Première ligne: RT/x.y.z STATUS_CODE Message
+        Lignes suivantes: Clé: Valeur (ou texte libre).
+        """
+        lines = raw.strip().split("\n")
+        if not lines:
+            return {"error": "Empty response"}
+
+        # Parse status line
+        status_line = lines[0].strip()
+        if "401" in status_line or "Credentials required" in status_line:
+            return {"error": "Authentication failed"}
+        if status_line.startswith("RT/error"):
+            return {"error": status_line}
+
+        result = {"_status_line": status_line, "_raw": raw}
+        current_key = None
+        for line in lines[1:]:
+            if line.startswith("#"):
+                result["_message"] = line.strip("# ").strip()
+                continue
+            if ": " in line and not line.startswith(" "):
+                key, val = line.split(": ", 1)
+                key = key.strip()
+                result[key] = val.strip()
+                current_key = key
+            elif current_key and line.startswith("  "):
+                # Continuation de la valeur précédente (multi-ligne)
+                result[current_key] += "\n" + line.strip()
+
+        return result
 
     def test_connection(self) -> dict:
-        result = self._request("GET", "/REST/2.0/")
-        if "error" in result:
-            return {"connected": False, "error": result["error"]}
-        return {"connected": True, "version": result.get("Version", "unknown")}
+        raw = self._rt_request("/REST/1.0/")
+        if "200 Ok" in raw or "200 OK" in raw:
+            # Extraire la version depuis la première ligne
+            version = raw.split("\n")[0].split(" ")[0] if raw else "unknown"
+            return {"connected": True, "version": version}
+        return {"connected": False, "error": raw[:200]}
 
     def get_users(self) -> list:
-        result = self._request("GET", "/REST/2.0/users?per_page=100")
-        if "error" in result:
-            return []
-        items = result.get("items", [])
-        return [{"id": u.get("id", ""), "name": u.get("id", ""),
-                 "email": u.get("id", "")} for u in items]
+        """Récupère les utilisateurs RT via REST1.
+        Scanne les IDs utilisateurs et filtre les comptes système.
+        """
+        system_users = {"Nobody", "RT_System", "RT_SystemUser"}
+        users = []
+
+        # Scanner les IDs utilisateurs (1 à 100)
+        for uid in range(1, 101):
+            user_raw = self._rt_request(f"/REST/1.0/user/{uid}")
+            user_data = self._parse_rt_response(user_raw)
+            name = user_data.get("Name", "")
+
+            if not name or "does not exist" in user_data.get("_message", "").lower() \
+                    or "does not exist" in user_data.get("_raw", "") \
+                    or "No user named" in user_data.get("_raw", ""):
+                continue
+
+            # Filtrer les comptes système
+            if name in system_users:
+                continue
+
+            users.append({
+                "id": user_data.get("id", f"user/{uid}").replace("user/", ""),
+                "name": user_data.get("RealName") or name,
+                "email": user_data.get("EmailAddress", ""),
+                "username": name,
+            })
+
+        return users
 
     def get_queues(self) -> list:
-        result = self._request("GET", "/REST/2.0/queues?per_page=50")
-        if "error" in result:
-            return []
-        items = result.get("items", [])
-        return [{"id": q.get("id", ""), "name": q.get("id", "")} for q in items]
+        """Récupère les queues RT via REST1."""
+        # RT REST1 n'a pas de search pour les queues
+        # On récupère les queues RTIR connues par défaut
+        queue_names = ["General", "Incident Reports", "Incidents",
+                       "Investigations", "Countermeasures"]
+        queues = []
+        for qname in queue_names:
+            raw = self._rt_request(f"/REST/1.0/queue/{urllib.parse.quote(qname)}")
+            data = self._parse_rt_response(raw)
+            if data.get("id") and "error" not in data:
+                queues.append({
+                    "id": data["id"].replace("queue/", ""),
+                    "name": data.get("Name", qname),
+                })
+        return queues
 
     def create_ticket(self, data: dict) -> dict:
-        payload = {
-            "Queue": data.get("queue", "Incident Reports"),
-            "Subject": data.get("title", "New Incident"),
-            "Priority": self._map_priority(data.get("priority", "medium")),
-            "Owner": data.get("assignee", "Nobody"),
-            "Content": data.get("description", ""),
-            "ContentType": "text/plain",
-        }
-        if data.get("custom_fields"):
-            payload["CustomFields"] = data["custom_fields"]
+        content_lines = [
+            f"Queue: {data.get('queue', 'Incident Reports')}",
+            f"Subject: {data.get('title', 'New Incident')}",
+            f"Priority: {self._map_priority(data.get('priority', 'medium'))}",
+            f"Owner: {data.get('assignee', 'Nobody')}",
+            f"Text: {data.get('description', '').replace(chr(10), chr(10) + ' ')}",
+        ]
+        content = "\n".join(content_lines)
 
-        result = self._request("POST", "/REST/2.0/ticket", payload)
-        if "error" in result:
-            return result
-        return {
-            "id": str(result.get("id", "")),
-            "url": f"{self.base_url}/Ticket/Display.html?id={result.get('id', '')}",
-            "status": "created"
-        }
+        raw = self._rt_request("/REST/1.0/ticket/new", {"content": content})
+        parsed = self._parse_rt_response(raw)
+
+        # Extraire l'ID du ticket créé depuis le message
+        # Format typique: "# Ticket 123 created."
+        ticket_id = ""
+        msg = parsed.get("_message", "") or parsed.get("_raw", "")
+        for word in msg.split():
+            if word.isdigit():
+                ticket_id = word
+                break
+
+        if ticket_id:
+            return {
+                "id": ticket_id,
+                "url": f"{self.base_url}/Ticket/Display.html?id={ticket_id}",
+                "status": "created"
+            }
+        return {"error": f"Ticket creation failed: {raw[:300]}"}
 
     def update_ticket(self, ticket_id: str, data: dict) -> dict:
-        payload = {}
+        content_lines = []
         if "status" in data:
             status_map = {"open": "new", "in_progress": "open", "closed": "resolved"}
-            payload["Status"] = status_map.get(data["status"], data["status"])
+            content_lines.append(f"Status: {status_map.get(data['status'], data['status'])}")
         if "priority" in data:
-            payload["Priority"] = self._map_priority(data["priority"])
+            content_lines.append(f"Priority: {self._map_priority(data['priority'])}")
         if "assignee" in data:
-            payload["Owner"] = data["assignee"]
+            content_lines.append(f"Owner: {data['assignee']}")
         if "title" in data:
-            payload["Subject"] = data["title"]
+            content_lines.append(f"Subject: {data['title']}")
 
-        result = self._request("PUT", f"/REST/2.0/ticket/{ticket_id}", payload)
-        return result if "error" in result else {"status": "updated"}
+        if not content_lines:
+            return {"status": "no_changes"}
+
+        content = "\n".join(content_lines)
+        raw = self._rt_request(f"/REST/1.0/ticket/{ticket_id}/edit",
+                               {"content": content})
+        if "200" in raw.split("\n")[0]:
+            return {"status": "updated"}
+        return {"error": raw[:300]}
 
     def get_ticket(self, ticket_id: str) -> dict:
-        result = self._request("GET", f"/REST/2.0/ticket/{ticket_id}")
-        if "error" in result:
-            return result
+        raw = self._rt_request(f"/REST/1.0/ticket/{ticket_id}/show")
+        data = self._parse_rt_response(raw)
+        if "error" in data:
+            return data
+        priority_val = int(data.get("Priority", "50") or "50")
+        priority_map = {90: "critical", 70: "high", 50: "medium", 20: "low"}
+        priority = min(priority_map.items(), key=lambda x: abs(x[0] - priority_val))[1]
         return {
-            "id": str(result.get("id", "")),
-            "title": result.get("Subject", ""),
-            "status": result.get("Status", ""),
-            "priority": result.get("Priority", ""),
-            "assignee": result.get("Owner", ""),
-            "created": result.get("Created", ""),
-            "updated": result.get("LastUpdated", ""),
+            "id": data.get("id", "").replace("ticket/", ""),
+            "title": data.get("Subject", ""),
+            "status": data.get("Status", ""),
+            "priority": priority,
+            "assignee": data.get("Owner", ""),
+            "created": data.get("Created", ""),
+            "updated": data.get("LastUpdated", ""),
+            "queue": data.get("Queue", ""),
         }
 
     def add_comment(self, ticket_id: str, text: str, author: str = "") -> dict:
-        payload = {
-            "Content": f"[{author}] {text}" if author else text,
-            "ContentType": "text/plain",
-        }
-        result = self._request("POST", f"/REST/2.0/ticket/{ticket_id}/comment", payload)
-        return result if "error" in result else {"status": "comment_added"}
+        comment_text = f"[{author}] {text}" if author else text
+        content = f"id: {ticket_id}\nAction: comment\nText: {comment_text.replace(chr(10), chr(10) + ' ')}"
+        raw = self._rt_request(f"/REST/1.0/ticket/{ticket_id}/comment",
+                               {"content": content})
+        if "200" in raw.split("\n")[0] or "recorded" in raw.lower():
+            return {"status": "comment_added"}
+        return {"error": raw[:300]}
 
     def list_tickets(self, filters: dict = None) -> list:
         query_parts = []
@@ -212,12 +313,32 @@ class RTIRConnector(BaseConnector):
                 query_parts.append(f"Queue='{filters['queue']}'")
         query = " AND ".join(query_parts) if query_parts else "Status!='deleted'"
 
-        result = self._request("GET",
-            f"/REST/2.0/tickets?query={urllib.parse.quote(query)}&per_page=50&orderby=-Created")
-        if "error" in result:
+        raw = self._rt_request(
+            f"/REST/1.0/search/ticket?query={urllib.parse.quote(query)}"
+            f"&orderby=-Created&format=l")
+
+        tickets_list = []
+        # Format: "id: ticket/123\nSubject: ...\n..."
+        # Les tickets sont séparés par des lignes "--"
+        if "200" not in raw.split("\n")[0]:
             return []
-        items = result.get("items", [])
-        return [{"id": t.get("id", ""), "title": t.get("id", "")} for t in items]
+
+        current = {}
+        for line in raw.split("\n"):
+            line = line.strip()
+            if line == "--" or (line.startswith("id:") and current.get("id")):
+                if current.get("id"):
+                    tickets_list.append(current)
+                current = {}
+            if ": " in line and not line.startswith("RT/") and not line.startswith("#"):
+                key, val = line.split(": ", 1)
+                current[key.strip()] = val.strip()
+
+        if current.get("id"):
+            tickets_list.append(current)
+
+        return [{"id": t.get("id", "").replace("ticket/", ""),
+                 "title": t.get("Subject", "")} for t in tickets_list]
 
     @staticmethod
     def _map_priority(p: str) -> int:
