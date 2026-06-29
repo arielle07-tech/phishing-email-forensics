@@ -16,6 +16,9 @@ Plateforme d'analyse forensique automatisee d'emails de phishing, avec analyse I
 - **Scoring de risque** : algorithme multi-facteurs (0-100) avec verdict automatique
 - **Analyse IA** : detection de tactiques de social engineering (framework CIALDINI + MITRE ATT&CK)
 - **Dashboard SOC** : interface web avec upload `.eml`, kill chain visuelle, radar chart, timeline d'attaque
+- **Ticketing SOC** : systeme de tickets d'incident avec statuts, priorite, assignation, commentaires et historique d'activite
+- **Rapports d'incident** : generation automatique PDF et Word (DOCX) avec details forensiques complets
+- **Integrations** : connecteurs bidirectionnels RTIR, TheHive, JIRA avec sync automatique des tickets et detection des utilisateurs
 - **Multi-provider IA** : Gemini, Groq, OpenAI, Anthropic, Ollama
 
 ## Architecture
@@ -98,6 +101,13 @@ Le serveur Flask expose les endpoints suivants :
 | `/api/reports/<file>` | GET | Telecharger un rapport |
 | `/api/report/pdf` | POST | Generer rapport d'incident PDF |
 | `/api/report/docx` | POST | Generer rapport d'incident DOCX |
+| `/api/integrations/connectors` | GET | Liste des connecteurs disponibles |
+| `/api/integrations/connect` | POST | Connecter un outil (RTIR/TheHive/JIRA) |
+| `/api/integrations/status` | GET | Statut de la connexion active |
+| `/api/integrations/users` | GET | Utilisateurs de l'outil connecte |
+| `/api/integrations/tickets` | GET/POST | Lister/creer des tickets distants |
+| `/api/integrations/tickets/<id>` | GET/PUT | Lire/modifier un ticket distant |
+| `/api/integrations/tickets/<id>/comment` | POST | Commenter un ticket distant |
 
 ## Stack technique
 

@@ -196,6 +196,147 @@ def generate_docx():
         return jsonify({"error": f"Erreur génération DOCX: {str(e)}"}), 500
 
 
+# ── Integrations (RTIR, TheHive, JIRA) ──
+
+# Stocke la config du connecteur actif en mémoire
+_integration_config = {}
+_active_connector = None
+
+
+@app.route("/api/integrations/connectors", methods=["GET"])
+def list_connectors():
+    """Liste les connecteurs disponibles."""
+    from scripts.integrations import list_available_connectors
+    connectors = list_available_connectors()
+    # Ajouter le statut de connexion
+    for c in connectors:
+        c["connected"] = (_active_connector is not None and
+                         _active_connector.name == c["name"])
+    return jsonify(connectors)
+
+
+@app.route("/api/integrations/connect", methods=["POST"])
+def connect_integration():
+    """Connecte un outil de ticketing externe."""
+    global _integration_config, _active_connector
+    from scripts.integrations import get_connector
+
+    data = request.get_json(silent=True)
+    if not data or "connector" not in data:
+        return jsonify({"error": "Champ 'connector' requis (rtir, thehive, jira)"}), 400
+
+    try:
+        connector = get_connector(data["connector"], data.get("config", {}))
+        result = connector.test_connection()
+        if not result.get("connected"):
+            return jsonify({"error": result.get("error", "Connexion échouée")}), 400
+
+        _active_connector = connector
+        _integration_config = data
+        return jsonify({"status": "connected", "connector": data["connector"], **result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/integrations/disconnect", methods=["POST"])
+def disconnect_integration():
+    """Déconnecte l'outil de ticketing."""
+    global _active_connector, _integration_config
+    _active_connector = None
+    _integration_config = {}
+    return jsonify({"status": "disconnected"})
+
+
+@app.route("/api/integrations/status", methods=["GET"])
+def integration_status():
+    """Statut de la connexion active."""
+    if _active_connector:
+        result = _active_connector.test_connection()
+        return jsonify({
+            "connected": result.get("connected", False),
+            "connector": _active_connector.name,
+            "display_name": _active_connector.display_name,
+            **result
+        })
+    return jsonify({"connected": False})
+
+
+@app.route("/api/integrations/users", methods=["GET"])
+def integration_users():
+    """Récupère les utilisateurs depuis l'outil connecté."""
+    if not _active_connector:
+        return jsonify({"error": "Aucun outil connecté"}), 400
+    users = _active_connector.get_users()
+    return jsonify(users)
+
+
+@app.route("/api/integrations/queues", methods=["GET"])
+def integration_queues():
+    """Récupère les queues/projets depuis l'outil connecté."""
+    if not _active_connector:
+        return jsonify({"error": "Aucun outil connecté"}), 400
+    queues = _active_connector.get_queues()
+    return jsonify(queues)
+
+
+@app.route("/api/integrations/tickets", methods=["GET"])
+def integration_list_tickets():
+    """Liste les tickets depuis l'outil connecté."""
+    if not _active_connector:
+        return jsonify({"error": "Aucun outil connecté"}), 400
+    filters = {k: v for k, v in request.args.items()}
+    tickets_list = _active_connector.list_tickets(filters)
+    return jsonify(tickets_list)
+
+
+@app.route("/api/integrations/tickets", methods=["POST"])
+def integration_create_ticket():
+    """Crée un ticket dans l'outil connecté."""
+    if not _active_connector:
+        return jsonify({"error": "Aucun outil connecté"}), 400
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Données du ticket manquantes"}), 400
+    result = _active_connector.create_ticket(data)
+    if "error" in result:
+        return jsonify(result), 500
+    return jsonify(result), 201
+
+
+@app.route("/api/integrations/tickets/<ticket_id>", methods=["GET"])
+def integration_get_ticket(ticket_id):
+    """Récupère un ticket depuis l'outil connecté."""
+    if not _active_connector:
+        return jsonify({"error": "Aucun outil connecté"}), 400
+    result = _active_connector.get_ticket(ticket_id)
+    return jsonify(result)
+
+
+@app.route("/api/integrations/tickets/<ticket_id>", methods=["PUT"])
+def integration_update_ticket(ticket_id):
+    """Met à jour un ticket dans l'outil connecté."""
+    if not _active_connector:
+        return jsonify({"error": "Aucun outil connecté"}), 400
+    data = request.get_json(silent=True)
+    result = _active_connector.update_ticket(ticket_id, data)
+    if "error" in result:
+        return jsonify(result), 500
+    return jsonify(result)
+
+
+@app.route("/api/integrations/tickets/<ticket_id>/comment", methods=["POST"])
+def integration_add_comment(ticket_id):
+    """Ajoute un commentaire sur un ticket dans l'outil connecté."""
+    if not _active_connector:
+        return jsonify({"error": "Aucun outil connecté"}), 400
+    data = request.get_json(silent=True)
+    result = _active_connector.add_comment(
+        ticket_id, data.get("text", ""), data.get("author", ""))
+    if "error" in result:
+        return jsonify(result), 500
+    return jsonify(result)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Phishing Forensics Web App")
     parser.add_argument("--port", type=int, default=8080, help="Port (défaut: 8080)")

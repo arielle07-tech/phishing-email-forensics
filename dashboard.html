@@ -326,6 +326,82 @@
     .panel { break-inside:avoid; border-color:#ddd; }
   }
 
+  /* ── Ticket System ── */
+  .ticket-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+  @media(max-width:900px) { .ticket-board { grid-template-columns: 1fr; } }
+  .ticket-column { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); min-height: 200px; }
+  .ticket-col-header {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--text2); display: flex; align-items: center; justify-content: space-between;
+    background: rgba(255,255,255,.02);
+  }
+  .ticket-col-header .col-count {
+    background: var(--bg4); padding: 2px 8px; border-radius: 10px; font-size: 10px; color: var(--text3);
+  }
+  .ticket-col-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .ticket-card {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 4px;
+    padding: 12px; cursor: pointer; transition: all .15s;
+  }
+  .ticket-card:hover { border-color: var(--accent); background: var(--bg4); }
+  .ticket-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .ticket-id { font-family: monospace; font-size: 10px; color: var(--accent); font-weight: 700; }
+  .ticket-priority { padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+  .ticket-priority.critical { background: var(--danger-dim); color: var(--danger); }
+  .ticket-priority.high { background: var(--warning-dim); color: var(--warning); }
+  .ticket-priority.medium { background: rgba(91,192,222,.12); color: var(--info); }
+  .ticket-priority.low { background: var(--success-dim); color: var(--success); }
+  .ticket-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; line-height: 1.4; }
+  .ticket-meta { font-size: 10px; color: var(--text3); display: flex; gap: 12px; }
+  .ticket-meta span { display: flex; align-items: center; gap: 3px; }
+
+  /* ── Ticket Detail Modal ── */
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.7);
+    z-index: 300; display: flex; align-items: center; justify-content: center;
+  }
+  .modal {
+    background: var(--bg2); border: 1px solid var(--border2); border-radius: 8px;
+    width: 700px; max-width: 95vw; max-height: 85vh; overflow-y: auto;
+  }
+  .modal-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex;
+    align-items: center; justify-content: space-between;
+  }
+  .modal-header h3 { font-size: 14px; font-weight: 600; }
+  .modal-close { background: none; border: none; color: var(--text3); font-size: 20px; cursor: pointer; }
+  .modal-close:hover { color: var(--text); }
+  .modal-body { padding: 20px; }
+  .modal-section { margin-bottom: 20px; }
+  .modal-section h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text3); margin-bottom: 8px; }
+
+  .ticket-field { margin-bottom: 12px; }
+  .ticket-field label { display: block; font-size: 11px; color: var(--text3); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .5px; }
+  .ticket-field input, .ticket-field select, .ticket-field textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--border2); color: var(--text);
+    padding: 8px 12px; border-radius: 4px; font-size: 12px; font-family: inherit;
+  }
+  .ticket-field textarea { min-height: 60px; resize: vertical; }
+  .ticket-field input:focus, .ticket-field select:focus, .ticket-field textarea:focus { outline: none; border-color: var(--accent); }
+
+  .comment-list { max-height: 300px; overflow-y: auto; }
+  .comment-item { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .comment-item:last-child { border-bottom: none; }
+  .comment-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .comment-author { font-size: 11px; font-weight: 600; color: var(--accent); }
+  .comment-time { font-size: 10px; color: var(--text3); }
+  .comment-text { font-size: 12px; line-height: 1.5; color: var(--text); }
+
+  .activity-item { display: flex; gap: 10px; padding: 6px 0; font-size: 11px; color: var(--text2); }
+  .activity-time { color: var(--text3); min-width: 70px; font-size: 10px; }
+  .activity-icon { color: var(--accent); }
+
+  .ticket-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .ticket-stat { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; text-align: center; }
+  .ticket-stat .stat-value { font-size: 22px; font-weight: 700; }
+  .ticket-stat .stat-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+
   .hidden { display:none !important; }
 </style>
 </head>
@@ -348,7 +424,9 @@
     <button class="btn" onclick="downloadJSON()" id="btnJSON" style="display:none">Telecharger JSON</button>
     <button class="btn" onclick="downloadIncidentPDF()" id="btnIncidentPDF" style="display:none">Rapport PDF</button>
     <button class="btn" onclick="downloadIncidentDOCX()" id="btnIncidentDOCX" style="display:none">Rapport Word</button>
+    <button class="btn btn-primary" onclick="createTicketFromCurrent()" id="btnCreateTicket" style="display:none">Creer ticket</button>
     <button class="btn btn-primary" onclick="document.getElementById('emlInput').click()">Importer fichier</button>
+    <button class="btn" onclick="openSettingsModal()" id="btnSettings" title="Integrations">&#x2699;</button>
   </div>
 </div>
 
@@ -356,6 +434,7 @@
   <div class="tab active" onclick="switchTab('overview')" id="tab-overview">Vue d'ensemble</div>
   <div class="tab" onclick="switchTab('analysis')" id="tab-analysis">Analyse <span class="badge" id="analysisBadge" style="display:none">!</span></div>
   <div class="tab" onclick="switchTab('history')" id="tab-history">Historique <span class="badge" id="historyCount">0</span></div>
+  <div class="tab" onclick="switchTab('tickets')" id="tab-tickets">Tickets <span class="badge" id="ticketCount">0</span></div>
 </div>
 
 <!-- ══════════ OVERVIEW TAB ══════════ -->
@@ -484,9 +563,65 @@
   </div>
 </div>
 
+<!-- ══════════ TICKETS TAB ══════════ -->
+<div class="container hidden" id="page-tickets">
+  <div class="ticket-stats" id="ticketStats">
+    <div class="ticket-stat"><div class="stat-value" id="ts-total" style="color:var(--accent)">0</div><div class="stat-label">Total</div></div>
+    <div class="ticket-stat"><div class="stat-value" id="ts-open" style="color:var(--danger)">0</div><div class="stat-label">Ouverts</div></div>
+    <div class="ticket-stat"><div class="stat-value" id="ts-progress" style="color:var(--warning)">0</div><div class="stat-label">En cours</div></div>
+    <div class="ticket-stat"><div class="stat-value" id="ts-closed" style="color:var(--success)">0</div><div class="stat-label">Fermes</div></div>
+  </div>
+
+  <div class="toolbar" style="background:transparent;border:none;padding:0 0 12px 0">
+    <label>Priorite</label>
+    <select id="ticketFilterPriority" onchange="renderTicketBoard()">
+      <option value="">Toutes</option>
+      <option value="critical">Critical</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low</option>
+    </select>
+    <label>Assigne a</label>
+    <select id="ticketFilterAssignee" onchange="renderTicketBoard()">
+      <option value="">Tous</option>
+    </select>
+    <input type="text" id="ticketSearch" placeholder="Rechercher..." style="width:180px" oninput="renderTicketBoard()">
+    <div class="spacer"></div>
+    <button class="btn btn-sm btn-primary" onclick="openNewTicketModal()">+ Nouveau ticket</button>
+  </div>
+
+  <div class="ticket-board">
+    <div class="ticket-column">
+      <div class="ticket-col-header" style="border-top:3px solid var(--danger)">Ouvert <span class="col-count" id="col-open-count">0</span></div>
+      <div class="ticket-col-body" id="col-open"></div>
+    </div>
+    <div class="ticket-column">
+      <div class="ticket-col-header" style="border-top:3px solid var(--warning)">En cours <span class="col-count" id="col-progress-count">0</span></div>
+      <div class="ticket-col-body" id="col-progress"></div>
+    </div>
+    <div class="ticket-column">
+      <div class="ticket-col-header" style="border-top:3px solid var(--success)">Ferme <span class="col-count" id="col-closed-count">0</span></div>
+      <div class="ticket-col-body" id="col-closed"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ TICKET DETAIL MODAL ══════════ -->
+<div class="modal-overlay hidden" id="ticketModal" onclick="if(event.target===this)closeTicketModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">Ticket</h3>
+      <button class="modal-close" onclick="closeTicketModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
 <script>
 // ══════════ STATE ══════════
 let analysisHistory = JSON.parse(localStorage.getItem('phishing_history') || '[]');
+let tickets = JSON.parse(localStorage.getItem('phishing_tickets') || '[]');
+let ticketCounter = parseInt(localStorage.getItem('phishing_ticket_counter') || '0');
 let currentAnalysis = null;
 let currentTab = 'overview';
 let sortCol = 'date';
@@ -497,7 +632,7 @@ function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
-  ['overview','analysis','history'].forEach(p => {
+  ['overview','analysis','history','tickets'].forEach(p => {
     document.getElementById('page-' + p).classList.toggle('hidden', p !== tab);
   });
 }
@@ -595,6 +730,7 @@ function processReport(data) {
   document.getElementById('btnJSON').style.display = '';
   document.getElementById('btnIncidentPDF').style.display = '';
   document.getElementById('btnIncidentDOCX').style.display = '';
+  document.getElementById('btnCreateTicket').style.display = '';
   switchTab('analysis');
   document.getElementById('analysisBadge').style.display = '';
 }
@@ -967,7 +1103,13 @@ function renderHistoryTable() {
       <td style="font-size:11px">${esc(e.from.substring(0,40))}</td>
       <td><span class="score-pill ${e.level.toLowerCase()}">${e.score}</span></td>
       <td><span class="score-pill ${e.level.toLowerCase()}">${e.level}</span></td>
-      <td><button class="btn btn-sm" onclick="loadFromHistory(${e.id})">Voir</button> <button class="btn btn-sm btn-danger" onclick="deleteFromHistory(${e.id})">&#x2717;</button></td>
+      <td>
+        <button class="btn btn-sm" onclick="loadFromHistory(${e.id})">Voir</button>
+        <button class="btn btn-sm" onclick="reportFromHistory(${e.id},'pdf')" title="Rapport PDF">PDF</button>
+        <button class="btn btn-sm" onclick="reportFromHistory(${e.id},'docx')" title="Rapport Word">DOC</button>
+        <button class="btn btn-sm btn-primary" onclick="ticketFromHistory(${e.id})" title="Creer un ticket">Ticket</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteFromHistory(${e.id})">&#x2717;</button>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -1012,9 +1154,35 @@ function loadFromHistory(id) {
   switchTab('analysis');
 }
 
+function ticketFromHistory(id) {
+  const entry = analysisHistory.find(e => e.id === id);
+  if (!entry || !entry.data) return;
+  createTicketFromAnalysis(entry.data, id);
+}
+
 function deleteFromHistory(id) {
   analysisHistory = analysisHistory.filter(e => e.id !== id);
   saveHistory(); updateOverview(); renderHistoryTable();
+}
+
+async function reportFromHistory(id, format) {
+  const entry = analysisHistory.find(e => e.id === id);
+  if (!entry || !entry.data) { alert('Donnees introuvables'); return; }
+  try {
+    const res = await fetch('/api/report/' + format, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(entry.data)
+    });
+    if (!res.ok) { const err = await res.json(); alert(err.error || 'Erreur'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const subject = (entry.subject || 'incident').replace(/[^a-zA-Z0-9]/g,'_').substring(0,30);
+    const ext = format === 'pdf' ? '.pdf' : '.docx';
+    const a = document.createElement('a'); a.href = url;
+    a.download = 'Rapport_' + subject + ext;
+    a.click(); URL.revokeObjectURL(url);
+  } catch(e) { alert('Erreur: ' + e.message); }
 }
 
 function clearHistory() {
@@ -1075,6 +1243,14 @@ async function downloadIncidentDOCX() {
   } catch(e) { alert('Erreur: ' + e.message); }
 }
 
+// ══════════ CREATE TICKET FROM CURRENT ══════════
+function createTicketFromCurrent() {
+  if (!currentAnalysis) { alert('Aucune analyse disponible'); return; }
+  // Find matching history entry
+  const entry = analysisHistory.find(e => e.data === currentAnalysis);
+  createTicketFromAnalysis(currentAnalysis, entry ? entry.id : null);
+}
+
 // ══════════ DOWNLOAD JSON ══════════
 function downloadJSON() {
   if (!currentAnalysis) { alert('Aucune analyse a exporter'); return; }
@@ -1104,6 +1280,586 @@ function loadDemoData() {
 // ══════════ INIT ══════════
 updateOverview();
 renderHistoryTable();
+
+// ══════════════════════════════════════════════════
+// ══════════ TICKETING SYSTEM ══════════
+// ══════════════════════════════════════════════════
+
+function saveTickets() {
+  localStorage.setItem('phishing_tickets', JSON.stringify(tickets));
+  localStorage.setItem('phishing_ticket_counter', ticketCounter);
+}
+
+function createTicket(opts) {
+  ticketCounter++;
+  const ticket = {
+    id: ticketCounter,
+    title: opts.title || 'Nouveau ticket',
+    description: opts.description || '',
+    status: opts.status || 'open',          // open, in_progress, closed
+    priority: opts.priority || 'medium',    // critical, high, medium, low
+    assignee: opts.assignee || '',
+    created: new Date().toISOString(),
+    updated: new Date().toISOString(),
+    analysisId: opts.analysisId || null,
+    score: opts.score || 0,
+    level: opts.level || 'INFO',
+    comments: [],
+    activity: [{
+      time: new Date().toISOString(),
+      action: 'Ticket cree',
+      by: opts.assignee || 'Systeme'
+    }]
+  };
+  tickets.unshift(ticket);
+  saveTickets();
+  updateTicketBadge();
+  renderTicketBoard();
+  return ticket;
+}
+
+function createTicketFromAnalysis(analysisData, historyId) {
+  const meta = analysisData.metadata || {};
+  const verdict = analysisData.verdict || {};
+  const iocs = analysisData.iocs || {};
+
+  const level = verdict.risk_level || 'INFO';
+  const priorityMap = { 'CRITICAL': 'critical', 'HIGH': 'high', 'MEDIUM': 'medium', 'LOW': 'low', 'INFO': 'low' };
+
+  let desc = `Email suspect detecte.\n`;
+  desc += `Expediteur: ${meta.from || 'N/A'}\n`;
+  desc += `Sujet: ${meta.subject || 'N/A'}\n`;
+  desc += `Score: ${verdict.score || 0}/100 (${level})\n`;
+  desc += `Date: ${meta.date || 'N/A'}\n`;
+  if ((iocs.urls || []).length) desc += `URLs suspectes: ${iocs.urls.length}\n`;
+  if ((iocs.phishing_keywords || []).length) desc += `Mots-cles phishing: ${iocs.phishing_keywords.join(', ')}\n`;
+  if (verdict.summary) desc += `\nVerdict: ${verdict.summary}`;
+
+  const ticket = createTicket({
+    title: `[${level}] ${(meta.subject || 'Email suspect').substring(0, 60)}`,
+    description: desc,
+    priority: priorityMap[level] || 'medium',
+    score: verdict.score || 0,
+    level: level,
+    analysisId: historyId || null
+  });
+  switchTab('tickets');
+  openTicketDetail(ticket.id);
+}
+
+function updateTicketBadge() {
+  const openCount = tickets.filter(t => t.status !== 'closed').length;
+  document.getElementById('ticketCount').textContent = openCount;
+}
+
+function getFilteredTickets() {
+  let filtered = [...tickets];
+  const priority = document.getElementById('ticketFilterPriority').value;
+  const assignee = document.getElementById('ticketFilterAssignee').value;
+  const search = document.getElementById('ticketSearch').value.toLowerCase();
+
+  if (priority) filtered = filtered.filter(t => t.priority === priority);
+  if (assignee) filtered = filtered.filter(t => t.assignee === assignee);
+  if (search) filtered = filtered.filter(t => (t.title + t.description + t.assignee).toLowerCase().includes(search));
+
+  return filtered;
+}
+
+function renderTicketBoard() {
+  const filtered = getFilteredTickets();
+  const open = filtered.filter(t => t.status === 'open');
+  const progress = filtered.filter(t => t.status === 'in_progress');
+  const closed = filtered.filter(t => t.status === 'closed');
+
+  // Stats
+  document.getElementById('ts-total').textContent = tickets.length;
+  document.getElementById('ts-open').textContent = tickets.filter(t => t.status === 'open').length;
+  document.getElementById('ts-progress').textContent = tickets.filter(t => t.status === 'in_progress').length;
+  document.getElementById('ts-closed').textContent = tickets.filter(t => t.status === 'closed').length;
+
+  // Column counts
+  document.getElementById('col-open-count').textContent = open.length;
+  document.getElementById('col-progress-count').textContent = progress.length;
+  document.getElementById('col-closed-count').textContent = closed.length;
+
+  // Render cards
+  document.getElementById('col-open').innerHTML = open.map(renderTicketCard).join('') || '<div class="empty-state">Aucun ticket</div>';
+  document.getElementById('col-progress').innerHTML = progress.map(renderTicketCard).join('') || '<div class="empty-state">Aucun ticket</div>';
+  document.getElementById('col-closed').innerHTML = closed.map(renderTicketCard).join('') || '<div class="empty-state">Aucun ticket</div>';
+
+  // Update assignee filter dropdown
+  const assignees = [...new Set(tickets.map(t => t.assignee).filter(Boolean))];
+  const sel = document.getElementById('ticketFilterAssignee');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Tous</option>' + assignees.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+  sel.value = current;
+
+  updateTicketBadge();
+}
+
+function renderTicketCard(t) {
+  const age = getTimeAgo(t.created);
+  const commentCount = t.comments.length;
+  return `<div class="ticket-card" onclick="openTicketDetail(${t.id})">
+    <div class="ticket-card-header">
+      <span class="ticket-id">INC-${String(t.id).padStart(4,'0')}</span>
+      <span class="ticket-priority ${t.priority}">${t.priority}</span>
+    </div>
+    <div class="ticket-title">${esc(t.title.substring(0,80))}</div>
+    <div class="ticket-meta">
+      <span>${age}</span>
+      ${t.assignee ? `<span>&#x1f464; ${esc(t.assignee)}</span>` : ''}
+      ${commentCount ? `<span>&#x1f4ac; ${commentCount}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+function getTimeAgo(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return mins + 'min';
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + 'h';
+  return Math.floor(hours / 24) + 'j';
+}
+
+// ══════════ TICKET DETAIL MODAL ══════════
+
+function openTicketDetail(id) {
+  const t = tickets.find(x => x.id === id);
+  if (!t) return;
+
+  document.getElementById('modalTitle').textContent = `INC-${String(t.id).padStart(4,'0')} — Detail du ticket`;
+
+  const statusOptions = [
+    {value:'open', label:'Ouvert'}, {value:'in_progress', label:'En cours'}, {value:'closed', label:'Ferme'}
+  ];
+  const priorityOptions = [
+    {value:'critical', label:'Critical'}, {value:'high', label:'High'}, {value:'medium', label:'Medium'}, {value:'low', label:'Low'}
+  ];
+
+  let html = `
+  <div class="modal-section">
+    <h4>Informations</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="ticket-field">
+        <label>Statut</label>
+        <select id="editStatus" onchange="updateTicketField(${t.id},'status',this.value)">
+          ${statusOptions.map(o => `<option value="${o.value}" ${t.status===o.value?'selected':''}>${o.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="ticket-field">
+        <label>Priorite</label>
+        <select id="editPriority" onchange="updateTicketField(${t.id},'priority',this.value)">
+          ${priorityOptions.map(o => `<option value="${o.value}" ${t.priority===o.value?'selected':''}>${o.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="ticket-field">
+        <label>Assigne a</label>
+        <input type="text" value="${esc(t.assignee)}" placeholder="Nom de l'analyste"
+          onchange="updateTicketField(${t.id},'assignee',this.value)">
+      </div>
+      <div class="ticket-field">
+        <label>Cree le</label>
+        <input type="text" value="${new Date(t.created).toLocaleString('fr-FR')}" readonly style="color:var(--text3)">
+      </div>
+    </div>
+    <div class="ticket-field">
+      <label>Titre</label>
+      <input type="text" value="${esc(t.title)}" onchange="updateTicketField(${t.id},'title',this.value)">
+    </div>
+    <div class="ticket-field">
+      <label>Description</label>
+      <textarea onchange="updateTicketField(${t.id},'description',this.value)">${esc(t.description)}</textarea>
+    </div>
+  </div>
+
+  ${t.analysisId ? `<div class="modal-section">
+    <button class="btn btn-sm" onclick="closeTicketModal();loadFromHistory(${t.analysisId})">Voir l'analyse originale</button>
+    <button class="btn btn-sm" onclick="reportFromHistory(${t.analysisId},'pdf')">Rapport PDF</button>
+    <button class="btn btn-sm" onclick="reportFromHistory(${t.analysisId},'docx')">Rapport Word</button>
+  </div>` : ''}
+
+  <div class="modal-section">
+    <h4>Commentaires (${t.comments.length})</h4>
+    <div class="comment-list" id="commentList">
+      ${t.comments.length ? t.comments.map(c => `
+        <div class="comment-item">
+          <div class="comment-header">
+            <span class="comment-author">${esc(c.author)}</span>
+            <span class="comment-time">${new Date(c.time).toLocaleString('fr-FR')}</span>
+          </div>
+          <div class="comment-text">${esc(c.text)}</div>
+        </div>
+      `).join('') : '<div class="empty-state">Aucun commentaire</div>'}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input type="text" id="commentAuthor" placeholder="Votre nom" style="width:120px;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px">
+      <input type="text" id="commentText" placeholder="Ajouter un commentaire..." style="flex:1;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px"
+        onkeydown="if(event.key==='Enter')addComment(${t.id})">
+      <button class="btn btn-sm btn-primary" onclick="addComment(${t.id})">Envoyer</button>
+    </div>
+  </div>
+
+  <div class="modal-section">
+    <h4>Historique d'activite</h4>
+    <div style="max-height:200px;overflow-y:auto">
+      ${t.activity.map(a => `
+        <div class="activity-item">
+          <span class="activity-time">${new Date(a.time).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+          <span class="activity-icon">&#x25CF;</span>
+          <span>${esc(a.action)}${a.by ? ` — ${esc(a.by)}` : ''}</span>
+        </div>
+      `).reverse().join('')}
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+    <button class="btn btn-sm btn-danger" onclick="deleteTicket(${t.id})">Supprimer</button>
+    <button class="btn btn-sm" onclick="closeTicketModal()">Fermer</button>
+  </div>`;
+
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('ticketModal').classList.remove('hidden');
+}
+
+function closeTicketModal() {
+  document.getElementById('ticketModal').classList.add('hidden');
+}
+
+function updateTicketField(id, field, value) {
+  const t = tickets.find(x => x.id === id);
+  if (!t) return;
+  const old = t[field];
+  t[field] = value;
+  t.updated = new Date().toISOString();
+  const labels = {status:'Statut',priority:'Priorite',assignee:'Assigne a',title:'Titre',description:'Description'};
+  const statusLabels = {open:'Ouvert',in_progress:'En cours',closed:'Ferme'};
+  let oldLabel = old, newLabel = value;
+  if (field === 'status') { oldLabel = statusLabels[old]||old; newLabel = statusLabels[value]||value; }
+  t.activity.push({
+    time: new Date().toISOString(),
+    action: `${labels[field]||field} modifie: ${oldLabel} → ${newLabel}`,
+    by: t.assignee || 'Systeme'
+  });
+  saveTickets();
+  renderTicketBoard();
+}
+
+function addComment(id) {
+  const t = tickets.find(x => x.id === id);
+  if (!t) return;
+  const author = document.getElementById('commentAuthor').value.trim() || 'Analyste';
+  const text = document.getElementById('commentText').value.trim();
+  if (!text) return;
+
+  t.comments.push({ author, text, time: new Date().toISOString() });
+  t.activity.push({ time: new Date().toISOString(), action: `Commentaire ajoute`, by: author });
+  t.updated = new Date().toISOString();
+  saveTickets();
+  openTicketDetail(id); // refresh modal
+}
+
+function deleteTicket(id) {
+  if (!confirm('Supprimer ce ticket ?')) return;
+  tickets = tickets.filter(x => x.id !== id);
+  saveTickets();
+  closeTicketModal();
+  renderTicketBoard();
+}
+
+function openNewTicketModal() {
+  document.getElementById('modalTitle').textContent = 'Nouveau ticket';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="ticket-field">
+      <label>Titre</label>
+      <input type="text" id="newTicketTitle" placeholder="Titre du ticket">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="ticket-field">
+        <label>Priorite</label>
+        <select id="newTicketPriority">
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium" selected>Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
+      <div class="ticket-field">
+        <label>Assigne a</label>
+        <input type="text" id="newTicketAssignee" placeholder="Nom de l'analyste">
+      </div>
+    </div>
+    <div class="ticket-field">
+      <label>Description</label>
+      <textarea id="newTicketDesc" rows="4" placeholder="Decrivez l'incident..."></textarea>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+      <button class="btn btn-sm" onclick="closeTicketModal()">Annuler</button>
+      <button class="btn btn-sm btn-primary" onclick="submitNewTicket()">Creer le ticket</button>
+    </div>`;
+  document.getElementById('ticketModal').classList.remove('hidden');
+}
+
+function submitNewTicket() {
+  const title = document.getElementById('newTicketTitle').value.trim();
+  if (!title) { alert('Titre requis'); return; }
+  createTicket({
+    title,
+    description: document.getElementById('newTicketDesc').value.trim(),
+    priority: document.getElementById('newTicketPriority').value,
+    assignee: document.getElementById('newTicketAssignee').value.trim()
+  });
+  closeTicketModal();
+}
+
+// ══════════════════════════════════════════════════
+// ══════════ INTEGRATIONS ══════════
+// ══════════════════════════════════════════════════
+
+let integrationStatus = { connected: false, connector: null };
+let remoteUsers = [];
+
+async function checkIntegrationStatus() {
+  try {
+    const res = await fetch('/api/integrations/status');
+    integrationStatus = await res.json();
+    updateIntegrationIndicator();
+    if (integrationStatus.connected) await fetchRemoteUsers();
+  } catch(e) { integrationStatus = { connected: false }; }
+}
+
+function updateIntegrationIndicator() {
+  const dot = document.getElementById('statusDot');
+  const label = document.getElementById('statusLabel');
+  if (integrationStatus.connected) {
+    dot.style.background = 'var(--success)';
+    label.textContent = integrationStatus.display_name || integrationStatus.connector;
+  } else {
+    dot.style.background = 'var(--text3)';
+    label.textContent = 'Local';
+  }
+}
+
+async function fetchRemoteUsers() {
+  try {
+    const res = await fetch('/api/integrations/users');
+    if (res.ok) {
+      remoteUsers = await res.json();
+      // Update assignee dropdowns
+      updateAssigneeDropdowns();
+    }
+  } catch(e) { remoteUsers = []; }
+}
+
+function updateAssigneeDropdowns() {
+  const sel = document.getElementById('ticketFilterAssignee');
+  if (!sel) return;
+  const current = sel.value;
+  let opts = '<option value="">Tous</option>';
+  remoteUsers.forEach(u => {
+    opts += `<option value="${esc(u.name)}">${esc(u.name)}${u.email?' ('+esc(u.email)+')':''}</option>`;
+  });
+  // Also add local assignees not in remote
+  const localAssignees = [...new Set(tickets.map(t=>t.assignee).filter(Boolean))];
+  localAssignees.forEach(a => {
+    if (!remoteUsers.find(u => u.name === a)) {
+      opts += `<option value="${esc(a)}">${esc(a)}</option>`;
+    }
+  });
+  sel.innerHTML = opts;
+  sel.value = current;
+}
+
+function openSettingsModal() {
+  document.getElementById('modalTitle').textContent = 'Integrations — Connecter un outil';
+  let connectorForms = {
+    rtir: `
+      <div class="ticket-field"><label>URL RTIR</label><input type="text" id="cfg-url" placeholder="http://localhost:8080"></div>
+      <div class="ticket-field"><label>Token API</label><input type="text" id="cfg-token" placeholder="Token RT (optionnel)"></div>
+      <div class="ticket-field"><label>Utilisateur</label><input type="text" id="cfg-user" placeholder="root"></div>
+      <div class="ticket-field"><label>Mot de passe</label><input type="password" id="cfg-password" placeholder="password"></div>`,
+    thehive: `
+      <div class="ticket-field"><label>URL TheHive</label><input type="text" id="cfg-url" placeholder="http://localhost:9000"></div>
+      <div class="ticket-field"><label>Cle API</label><input type="text" id="cfg-api_key" placeholder="API key TheHive"></div>`,
+    jira: `
+      <div class="ticket-field"><label>URL JIRA</label><input type="text" id="cfg-url" placeholder="https://yourorg.atlassian.net"></div>
+      <div class="ticket-field"><label>Email utilisateur</label><input type="text" id="cfg-user" placeholder="user@company.com"></div>
+      <div class="ticket-field"><label>Token API</label><input type="text" id="cfg-api_token" placeholder="JIRA API token"></div>
+      <div class="ticket-field"><label>Cle projet</label><input type="text" id="cfg-project_key" placeholder="SEC" value="SEC"></div>`
+  };
+
+  let html = `
+  <div class="modal-section">
+    <h4>Statut actuel</h4>
+    <div style="padding:10px;background:var(--bg3);border-radius:4px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      <span style="width:10px;height:10px;border-radius:50%;background:${integrationStatus.connected?'var(--success)':'var(--text3)'}"></span>
+      <span>${integrationStatus.connected ? esc(integrationStatus.display_name || integrationStatus.connector) + ' — Connecte' : 'Aucun outil connecte (mode local)'}</span>
+      ${integrationStatus.connected ? '<button class="btn btn-sm btn-danger" onclick="disconnectIntegration()">Deconnecter</button>' : ''}
+    </div>
+  </div>
+
+  <div class="modal-section">
+    <h4>Connecter un outil</h4>
+    <div class="ticket-field">
+      <label>Outil</label>
+      <select id="settingsConnector" onchange="updateSettingsForm()">
+        <option value="rtir">RTIR (Request Tracker)</option>
+        <option value="thehive">TheHive</option>
+        <option value="jira">JIRA</option>
+      </select>
+    </div>
+    <div id="connectorConfigForm">${connectorForms.rtir}</div>
+    <div class="ticket-field">
+      <label><input type="checkbox" id="cfg-verify_ssl" checked> Verifier SSL</label>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-sm" onclick="testIntegration()">Tester la connexion</button>
+      <button class="btn btn-sm btn-primary" onclick="connectIntegration()">Connecter</button>
+    </div>
+    <div id="settingsResult" style="margin-top:10px"></div>
+  </div>
+
+  ${remoteUsers.length ? `<div class="modal-section">
+    <h4>Utilisateurs detectes (${remoteUsers.length})</h4>
+    <div style="max-height:150px;overflow-y:auto">
+      ${remoteUsers.map(u => `<div style="padding:4px 0;font-size:12px;border-bottom:1px solid var(--border)">${esc(u.name)} ${u.email?'<span style="color:var(--text3)">'+esc(u.email)+'</span>':''}</div>`).join('')}
+    </div>
+  </div>` : ''}
+
+  <div style="text-align:right;margin-top:16px"><button class="btn btn-sm" onclick="closeTicketModal()">Fermer</button></div>`;
+
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('ticketModal').classList.remove('hidden');
+}
+
+function updateSettingsForm() {
+  const type = document.getElementById('settingsConnector').value;
+  const forms = {
+    rtir: `
+      <div class="ticket-field"><label>URL RTIR</label><input type="text" id="cfg-url" placeholder="http://localhost:8080"></div>
+      <div class="ticket-field"><label>Token API</label><input type="text" id="cfg-token" placeholder="Token RT (optionnel)"></div>
+      <div class="ticket-field"><label>Utilisateur</label><input type="text" id="cfg-user" placeholder="root"></div>
+      <div class="ticket-field"><label>Mot de passe</label><input type="password" id="cfg-password" placeholder="password"></div>`,
+    thehive: `
+      <div class="ticket-field"><label>URL TheHive</label><input type="text" id="cfg-url" placeholder="http://localhost:9000"></div>
+      <div class="ticket-field"><label>Cle API</label><input type="text" id="cfg-api_key" placeholder="API key TheHive"></div>`,
+    jira: `
+      <div class="ticket-field"><label>URL JIRA</label><input type="text" id="cfg-url" placeholder="https://yourorg.atlassian.net"></div>
+      <div class="ticket-field"><label>Email utilisateur</label><input type="text" id="cfg-user" placeholder="user@company.com"></div>
+      <div class="ticket-field"><label>Token API</label><input type="text" id="cfg-api_token" placeholder="JIRA API token"></div>
+      <div class="ticket-field"><label>Cle projet</label><input type="text" id="cfg-project_key" placeholder="SEC" value="SEC"></div>`
+  };
+  document.getElementById('connectorConfigForm').innerHTML = forms[type] || '';
+}
+
+function getConnectorConfig() {
+  const type = document.getElementById('settingsConnector').value;
+  const config = { verify_ssl: document.getElementById('cfg-verify_ssl').checked };
+  // Collect all cfg- fields
+  document.querySelectorAll('[id^="cfg-"]').forEach(el => {
+    const key = el.id.replace('cfg-', '');
+    if (key === 'verify_ssl') return;
+    if (el.type === 'checkbox') config[key] = el.checked;
+    else config[key] = el.value;
+  });
+  return { connector: type, config };
+}
+
+async function testIntegration() {
+  const payload = getConnectorConfig();
+  const resultDiv = document.getElementById('settingsResult');
+  resultDiv.innerHTML = '<span style="color:var(--text2)">Test en cours...</span>';
+  try {
+    const res = await fetch('/api/integrations/connect', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.error) {
+      resultDiv.innerHTML = `<span style="color:var(--danger)">Echec: ${esc(data.error)}</span>`;
+    } else {
+      resultDiv.innerHTML = `<span style="color:var(--success)">Connexion OK ${data.version ? '(v'+esc(data.version)+')' : ''}</span>`;
+      // Disconnect after test
+      await fetch('/api/integrations/disconnect', {method:'POST'});
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<span style="color:var(--danger)">Erreur: ${esc(e.message)}</span>`;
+  }
+}
+
+async function connectIntegration() {
+  const payload = getConnectorConfig();
+  const resultDiv = document.getElementById('settingsResult');
+  resultDiv.innerHTML = '<span style="color:var(--text2)">Connexion...</span>';
+  try {
+    const res = await fetch('/api/integrations/connect', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.error) {
+      resultDiv.innerHTML = `<span style="color:var(--danger)">Echec: ${esc(data.error)}</span>`;
+    } else {
+      resultDiv.innerHTML = `<span style="color:var(--success)">Connecte a ${esc(data.connector)}</span>`;
+      await checkIntegrationStatus();
+      // Refresh modal
+      setTimeout(() => openSettingsModal(), 500);
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<span style="color:var(--danger)">Erreur: ${esc(e.message)}</span>`;
+  }
+}
+
+async function disconnectIntegration() {
+  await fetch('/api/integrations/disconnect', {method:'POST'});
+  integrationStatus = { connected: false };
+  remoteUsers = [];
+  updateIntegrationIndicator();
+  openSettingsModal(); // refresh
+}
+
+// ── Sync ticket to remote on create ──
+const _originalCreateTicket = createTicket;
+createTicket = function(opts) {
+  const ticket = _originalCreateTicket(opts);
+  if (integrationStatus.connected) {
+    syncTicketToRemote(ticket);
+  }
+  return ticket;
+};
+
+async function syncTicketToRemote(ticket) {
+  try {
+    const res = await fetch('/api/integrations/tickets', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        title: ticket.title,
+        description: ticket.description,
+        priority: ticket.priority,
+        assignee: ticket.assignee
+      })
+    });
+    const data = await res.json();
+    if (!data.error) {
+      // Store remote ID
+      ticket.remoteId = data.id;
+      ticket.remoteUrl = data.url;
+      ticket.activity.push({
+        time: new Date().toISOString(),
+        action: `Synchronise vers ${integrationStatus.display_name || integrationStatus.connector} (${data.id})`,
+        by: 'Systeme'
+      });
+      saveTickets();
+    }
+  } catch(e) { console.warn('Sync failed:', e); }
+}
+
+// ══════════ INIT TICKETS + INTEGRATIONS ══════════
+renderTicketBoard();
+checkIntegrationStatus();
 </script>
+</body>
+</html>
 </body>
 </html>
