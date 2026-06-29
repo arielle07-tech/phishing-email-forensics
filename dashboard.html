@@ -1456,8 +1456,15 @@ function openTicketDetail(id) {
       </div>
       <div class="ticket-field">
         <label>Assigne a</label>
-        <input type="text" value="${esc(t.assignee)}" placeholder="Nom de l'analyste"
-          onchange="updateTicketField(${t.id},'assignee',this.value)">
+        ${remoteUsers.length ? `
+          <select onchange="updateTicketField(${t.id},'assignee',this.value)">
+            <option value="">— Non assigne —</option>
+            ${remoteUsers.map(u => `<option value="${esc(u.name)}" ${t.assignee===u.name?'selected':''}>${esc(u.name)}${u.email?' ('+esc(u.email)+')':''}</option>`).join('')}
+          </select>
+        ` : `
+          <input type="text" value="${esc(t.assignee)}" placeholder="Nom de l'analyste"
+            onchange="updateTicketField(${t.id},'assignee',this.value)">
+        `}
       </div>
       <div class="ticket-field">
         <label>Cree le</label>
@@ -1587,7 +1594,12 @@ function openNewTicketModal() {
       </div>
       <div class="ticket-field">
         <label>Assigne a</label>
-        <input type="text" id="newTicketAssignee" placeholder="Nom de l'analyste">
+        ${remoteUsers.length ? `
+          <select id="newTicketAssignee">
+            <option value="">— Non assigne —</option>
+            ${remoteUsers.map(u => `<option value="${esc(u.name)}">${esc(u.name)}${u.email?' ('+esc(u.email)+')':''}</option>`).join('')}
+          </select>
+        ` : `<input type="text" id="newTicketAssignee" placeholder="Nom de l'analyste">`}
       </div>
     </div>
     <div class="ticket-field">

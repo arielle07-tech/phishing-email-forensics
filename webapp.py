@@ -203,6 +203,41 @@ _integration_config = {}
 _active_connector = None
 
 
+def _auto_connect_integration():
+    """Auto-connecte l'intégration configurée dans .env au démarrage."""
+    global _active_connector, _integration_config
+    connector_name = os.environ.get("TICKET_CONNECTOR", "").strip()
+    ticket_url = os.environ.get("TICKET_URL", "").strip()
+    if not connector_name or not ticket_url:
+        return
+
+    from scripts.integrations import get_connector
+    config = {
+        "url": ticket_url,
+        "user": os.environ.get("TICKET_USER", ""),
+        "password": os.environ.get("TICKET_PASSWORD", ""),
+        "token": os.environ.get("TICKET_TOKEN", ""),
+        "api_key": os.environ.get("TICKET_API_KEY", ""),
+        "api_token": os.environ.get("TICKET_API_TOKEN", ""),
+        "project_key": os.environ.get("TICKET_PROJECT_KEY", "SEC"),
+        "verify_ssl": os.environ.get("TICKET_VERIFY_SSL", "true").lower() in ("true", "1", "yes"),
+    }
+    try:
+        connector = get_connector(connector_name, config)
+        result = connector.test_connection()
+        if result.get("connected"):
+            _active_connector = connector
+            _integration_config = {"connector": connector_name, "config": config}
+            print(f"  [Integration] Connecte a {connector.display_name} ({ticket_url})")
+        else:
+            print(f"  [Integration] Echec connexion {connector_name}: {result.get('error', '?')}")
+    except Exception as e:
+        print(f"  [Integration] Erreur: {e}")
+
+
+_auto_connect_integration()
+
+
 @app.route("/api/integrations/connectors", methods=["GET"])
 def list_connectors():
     """Liste les connecteurs disponibles."""
