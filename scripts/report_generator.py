@@ -194,60 +194,21 @@ def generate_pdf_report(analysis: dict) -> bytes:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.colors import HexColor
     from reportlab.lib.units import mm
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-        PageBreak, HRFlowable
+        PageBreak, HRFlowable, KeepTogether
     )
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            topMargin=15*mm, bottomMargin=18*mm,
-                            leftMargin=18*mm, rightMargin=18*mm)
-    styles = getSampleStyleSheet()
 
-    # Colors
-    PRIMARY = HexColor('#0f3460')
-    ACCENT = HexColor('#e94560')
-    SUCCESS = HexColor('#27ae60')
-    WARNING = HexColor('#f39c12')
-    DANGER = HexColor('#e74c3c')
-    INFO = HexColor('#3498db')
-    LIGHT_BG = HexColor('#f8f9fc')
-    BORDER = HexColor('#e2e8f0')
-    TEXT_DARK = HexColor('#2d3748')
-    TEXT_MUTED = HexColor('#718096')
+    # ── Page dimensions ──
+    PAGE_W = A4[0]
+    MARGIN_L = 22*mm
+    MARGIN_R = 22*mm
+    CONTENT_W = PAGE_W - MARGIN_L - MARGIN_R  # ~166mm
 
-    level_colors = {
-        'CRITICAL': DANGER, 'HIGH': HexColor('#e67e22'),
-        'MEDIUM': INFO, 'LOW': SUCCESS, 'INFO': TEXT_MUTED
-    }
-
-    # Styles
-    styles.add(ParagraphStyle('CoverTitle', parent=styles['Title'],
-        fontSize=26, textColor=HexColor('#ffffff'), alignment=TA_CENTER,
-        spaceAfter=4, fontName='Helvetica-Bold'))
-    styles.add(ParagraphStyle('CoverSub', parent=styles['Normal'],
-        fontSize=12, textColor=HexColor('#cbd5e0'), alignment=TA_CENTER,
-        spaceAfter=2))
-    styles.add(ParagraphStyle('Body', parent=styles['Normal'],
-        fontSize=9, leading=13, textColor=TEXT_DARK))
-    styles.add(ParagraphStyle('BodySmall', parent=styles['Normal'],
-        fontSize=8, leading=11, textColor=TEXT_MUTED))
-    styles.add(ParagraphStyle('SubSection', parent=styles['Heading3'],
-        fontSize=10, textColor=HexColor('#4a5568'), spaceBefore=10, spaceAfter=4,
-        fontName='Helvetica-Bold'))
-    styles.add(ParagraphStyle('Mono', parent=styles['Normal'],
-        fontSize=7, fontName='Courier', textColor=HexColor('#4a5568'),
-        leading=9, backColor=LIGHT_BG))
-    styles.add(ParagraphStyle('Centered', parent=styles['Normal'],
-        fontSize=9, alignment=TA_CENTER, textColor=TEXT_DARK))
-    styles.add(ParagraphStyle('Footer', parent=styles['Normal'],
-        fontSize=7, textColor=TEXT_MUTED, alignment=TA_CENTER))
-
-    story = []
-
-    # Extract data
+    # Extract data early (needed for footer)
     meta = analysis.get("metadata", {})
     verdict = analysis.get("verdict", {})
     auth = analysis.get("authentication", {})
@@ -260,114 +221,222 @@ def generate_pdf_report(analysis: dict) -> bytes:
     score = verdict.get("score", 0)
     level = verdict.get("risk_level", "INFO")
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
-    color = level_colors.get(level, TEXT_MUTED)
     incident_id = _generate_incident_id(analysis)
     report_number = _generate_report_number(analysis)
     classification = _classify_incident(analysis)
-    timeline = _build_timeline(analysis)
-    exec_summary = _build_executive_summary(analysis, classification, incident_id)
+
+    # ── Footer on every page ──
+    def _page_footer(canvas, doc_obj):
+        canvas.saveState()
+        canvas.setFont('Helvetica', 7)
+        canvas.setFillColor(HexColor('#a0aec0'))
+        footer_text = (
+            f"Rapport {report_number}  |  Incident {incident_id}  |  "
+            f"Phishing Email Forensics  |  {classification['tlp']}  |  CONFIDENTIEL"
+        )
+        canvas.drawCentredString(PAGE_W / 2, 12*mm, footer_text)
+        canvas.drawRightString(PAGE_W - MARGIN_R, 12*mm, f"Page {doc_obj.page}")
+        canvas.restoreState()
+
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            topMargin=20*mm, bottomMargin=22*mm,
+                            leftMargin=MARGIN_L, rightMargin=MARGIN_R)
+
+    styles = getSampleStyleSheet()
+
+    # ── Color palette ──
+    NAVY = HexColor('#1a2744')
+    NAVY_LIGHT = HexColor('#2d4a7a')
+    STEEL = HexColor('#3d5a80')
+    ACCENT = HexColor('#c0392b')
+    SUCCESS = HexColor('#27ae60')
+    WARNING = HexColor('#e67e22')
+    DANGER = HexColor('#c0392b')
+    INFO_BLUE = HexColor('#2980b9')
+    LIGHT_BG = HexColor('#f4f6f9')
+    LIGHTER_BG = HexColor('#fafbfc')
+    BORDER = HexColor('#dce1e8')
+    TEXT_DARK = HexColor('#1a202c')
+    TEXT_BODY = HexColor('#2d3748')
+    TEXT_MUTED = HexColor('#718096')
+    WHITE = HexColor('#ffffff')
+
+    level_colors = {
+        'CRITICAL': DANGER, 'HIGH': WARNING,
+        'MEDIUM': INFO_BLUE, 'LOW': SUCCESS, 'INFO': TEXT_MUTED
+    }
+    color = level_colors.get(level, TEXT_MUTED)
+
+    # ── Typography styles ──
+    styles.add(ParagraphStyle('CoverTitle', parent=styles['Title'],
+        fontSize=28, textColor=WHITE, alignment=TA_CENTER,
+        spaceAfter=6, fontName='Helvetica-Bold', leading=34))
+    styles.add(ParagraphStyle('CoverSub', parent=styles['Normal'],
+        fontSize=11, textColor=HexColor('#b0bec5'), alignment=TA_CENTER,
+        spaceAfter=3, leading=14))
+    styles.add(ParagraphStyle('Body', parent=styles['Normal'],
+        fontSize=10, leading=15, textColor=TEXT_BODY, spaceBefore=2, spaceAfter=2))
+    styles.add(ParagraphStyle('BodySmall', parent=styles['Normal'],
+        fontSize=8.5, leading=12, textColor=TEXT_MUTED))
+    styles.add(ParagraphStyle('SubHeading', parent=styles['Normal'],
+        fontSize=11, textColor=STEEL, spaceBefore=14, spaceAfter=6,
+        fontName='Helvetica-Bold', leading=14))
+    styles.add(ParagraphStyle('Bullet', parent=styles['Normal'],
+        fontSize=10, leading=15, textColor=TEXT_BODY, leftIndent=12,
+        spaceBefore=2, spaceAfter=2))
+    styles.add(ParagraphStyle('Mono', parent=styles['Normal'],
+        fontSize=7.5, fontName='Courier', textColor=HexColor('#4a5568'),
+        leading=10, backColor=LIGHTER_BG, spaceBefore=1, spaceAfter=1))
+    styles.add(ParagraphStyle('FooterStyle', parent=styles['Normal'],
+        fontSize=7, textColor=TEXT_MUTED, alignment=TA_CENTER))
+
+    story = []
     sec = 0  # dynamic section counter
 
-    # ════════════════════════════════════════
-    # HEADER BANNER
-    # ════════════════════════════════════════
-    banner = Table([['']], colWidths=[174*mm], rowHeights=[48*mm])
-    banner.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), PRIMARY),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-    story.append(banner)
-    story.append(Spacer(1, -44*mm))
-    story.append(Paragraph("RAPPORT D'INCIDENT PHISHING", styles['CoverTitle']))
-    story.append(Paragraph(f"Rapport N° {report_number}", styles['CoverSub']))
-    story.append(Paragraph(f"Incident {incident_id} &mdash; {now} &mdash; {classification['tlp']}", styles['CoverSub']))
-    story.append(Spacer(1, 8*mm))
+    # ════════════════════════════════════════════════════
+    # COVER PAGE
+    # ════════════════════════════════════════════════════
+    story.append(Spacer(1, 55*mm))
 
-    # Severity badge
-    sev_text = f"SEVERITE: {level} &mdash; {classification['priority']} &mdash; SCORE: {score}/100"
-    sev_cell = [[Paragraph(f'<font color="#ffffff" size="14"><b>{sev_text}</b></font>',
-                            ParagraphStyle('sev', alignment=TA_CENTER))]]
-    sev_table = Table(sev_cell, colWidths=[174*mm], rowHeights=[12*mm])
+    # Title block (navy box)
+    cover_content = [
+        [Paragraph(
+            '<font size="28"><b>RAPPORT D\'INCIDENT</b></font><br/>'
+            '<font size="22"><b>PHISHING</b></font>',
+            ParagraphStyle('ct', alignment=TA_CENTER, textColor=WHITE, leading=34,
+                           fontName='Helvetica-Bold'))]
+    ]
+    cover_box = Table(cover_content, colWidths=[CONTENT_W], rowHeights=[42*mm])
+    cover_box.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), NAVY),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 20),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 20),
+        ('TOPPADDING', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+    ]))
+    story.append(cover_box)
+
+    # Severity stripe
+    sev_text = f"{level}  —  {classification['priority']}  —  SCORE {score}/100"
+    sev_cell = [[Paragraph(
+        f'<font color="#ffffff" size="13"><b>{sev_text}</b></font>',
+        ParagraphStyle('sev', alignment=TA_CENTER, leading=16))]]
+    sev_table = Table(sev_cell, colWidths=[CONTENT_W], rowHeights=[14*mm])
     sev_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), color),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
     ]))
     story.append(sev_table)
-    story.append(Spacer(1, 4*mm))
 
-    # ════════════════════════════════════════
-    # SOMMAIRE (table of contents)
-    # ════════════════════════════════════════
-    # Build section list dynamically
+    story.append(Spacer(1, 12*mm))
+
+    # Cover metadata
+    cover_meta = [
+        ["Rapport N°", report_number],
+        ["Incident", incident_id],
+        ["Date", now],
+        ["Classification", classification['tlp']],
+        ["Categorie", classification['category']],
+    ]
+    cm_table = Table(cover_meta, colWidths=[45*mm, CONTENT_W - 45*mm])
+    cm_table.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('TEXTCOLOR', (0, 0), (0, -1), NAVY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_BODY),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.3, BORDER),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(cm_table)
+
+    # ── Table of contents ──
+    story.append(Spacer(1, 15*mm))
     has_mitre = bool((ai.get("mitre_techniques", []) if ai else []) or
                      (ai.get("social_engineering_tactics", []) if ai else []) or
                      classification.get("mitre_tactics"))
-    toc_items = [
-        "Executive Summary",
-        "Alert Details",
-        "Triage Decision",
-        "Enrichment Findings",
-    ]
+    toc_items = ["Executive Summary", "Alert Details", "Triage Decision", "Enrichment Findings"]
     if has_mitre:
-        toc_items.append("MITRE ATT&CK Mapping")
+        toc_items.append("MITRE ATT&CK")
     toc_items.append("Recommended Response")
 
-    toc_text = " &mdash; ".join([f"<b>{i+1}.</b> {t}" for i, t in enumerate(toc_items)])
-    toc_text += " &mdash; <b>A/B.</b> Annexes"
-    story.append(Paragraph(toc_text, styles['BodySmall']))
-    story.append(Spacer(1, 4*mm))
+    toc_rows = []
+    for i, t in enumerate(toc_items):
+        toc_rows.append([f"{i+1}.", t])
+    toc_rows.append(["A/B.", "Annexes techniques"])
+    toc_t = Table(toc_rows, colWidths=[12*mm, 80*mm])
+    toc_t.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('TEXTCOLOR', (0, 0), (-1, -1), STEEL),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    story.append(Paragraph('<b>SOMMAIRE</b>',
+        ParagraphStyle('toc_h', fontSize=10, textColor=NAVY, fontName='Helvetica-Bold',
+                        spaceAfter=6)))
+    story.append(toc_t)
 
-    # ════════════════════════════════════════
+    story.append(PageBreak())
+
+    # ════════════════════════════════════════════════════
     # §1. EXECUTIVE SUMMARY
-    # ════════════════════════════════════════
+    # ════════════════════════════════════════════════════
     sec += 1
-    story.append(_pdf_section_header(str(sec), "EXECUTIVE SUMMARY", PRIMARY))
+    story.append(_pdf_section_header_v2(str(sec), "EXECUTIVE SUMMARY", NAVY, CONTENT_W))
+    story.append(Spacer(1, 6*mm))
 
-    # One-liner box (highlighted)
+    # Alert box
     one_liner = (
-        f"Severity: {level} &mdash; {_safe(classification['category'])} "
-        f"detecte depuis {_safe(meta.get('from', 'Inconnu'))} "
+        f"<b>Severity: {level}</b> &mdash; {_safe(classification['category'])} "
+        f"detecte depuis <b>{_safe(meta.get('from', 'Inconnu'))}</b> "
         f"(score {score}/100)."
     )
-    one_box = [[Paragraph(f'<b>{one_liner}</b>', styles['Body'])]]
-    one_t = Table(one_box, colWidths=[174*mm])
-    one_t.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), HexColor('#fefcbf')),
-        ('BOX', (0, 0), (-1, -1), 0.8, WARNING),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ('LEFTPADDING', (0, 0), (-1, -1), 10),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+    alert_box = [[Paragraph(one_liner, ParagraphStyle('ab', fontSize=10, leading=14,
+                                                       textColor=TEXT_DARK))]]
+    ab_t = Table(alert_box, colWidths=[CONTENT_W])
+    ab_t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), HexColor('#fff8e1')),
+        ('BOX', (0, 0), (-1, -1), 1, HexColor('#ffb300')),
+        ('TOPPADDING', (0, 0), (-1, -1), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('LEFTPADDING', (0, 0), (-1, -1), 14),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 14),
     ]))
-    story.append(one_t)
-    story.append(Spacer(1, 2*mm))
+    story.append(ab_t)
+    story.append(Spacer(1, 6*mm))
 
-    # Full summary (AI or verdict)
+    # AI or verdict summary
     ai_summary = ""
     if ai and not ai.get("error"):
         ai_summary = ai.get("executive_summary", "")
     if ai_summary:
         story.append(Paragraph(_safe(ai_summary), styles['Body']))
+        story.append(Spacer(1, 4*mm))
     elif verdict.get("summary"):
         story.append(Paragraph(_safe(verdict["summary"]), styles['Body']))
+        story.append(Spacer(1, 4*mm))
 
-    # Key takeaway: impact + classification
-    story.append(Spacer(1, 2*mm))
-    impact_text = (
-        f"<b>Impact :</b> {classification['sub_category']}. "
-        f"<b>Priorite :</b> {classification['priority']} &mdash; {classification['severity_description']}. "
-        f"<b>TLP :</b> {classification['tlp']}."
-    )
-    story.append(Paragraph(impact_text, styles['Body']))
+    # Impact / Priority / TLP on separate lines for readability
+    story.append(Paragraph(
+        f"<b>Impact :</b> {_safe(classification['sub_category'])}", styles['Body']))
+    story.append(Paragraph(
+        f"<b>Priorite :</b> {classification['priority']} &mdash; {classification['severity_description']}", styles['Body']))
+    story.append(Paragraph(
+        f"<b>Classification TLP :</b> {classification['tlp']}", styles['Body']))
 
-    # ════════════════════════════════════════
+    story.append(PageBreak())
+
+    # ════════════════════════════════════════════════════
     # §2. ALERT DETAILS
-    # ════════════════════════════════════════
+    # ════════════════════════════════════════════════════
     sec += 1
-    story.append(_pdf_section_header(str(sec), "ALERT DETAILS", PRIMARY))
+    story.append(_pdf_section_header_v2(str(sec), "ALERT DETAILS", NAVY, CONTENT_W))
+    story.append(Spacer(1, 6*mm))
+
     alert_data = [
         ["N° Rapport", report_number],
         ["N° Incident", incident_id],
@@ -381,69 +450,71 @@ def generate_pdf_report(analysis: dict) -> bytes:
         ["Categorie", classification["category"]],
         ["Score", f"{score}/100 ({level})"],
     ]
-    story.append(_pdf_info_table(alert_data, PRIMARY))
+    story.append(_pdf_info_table_v2(alert_data, NAVY, CONTENT_W))
 
+    story.append(PageBreak())
+
+    # ════════════════════════════════════════════════════
+    # §3. TRIAGE DECISION
+    # ════════════════════════════════════════════════════
+    sec += 1
+    story.append(_pdf_section_header_v2(str(sec), "TRIAGE DECISION", NAVY, CONTENT_W))
     story.append(Spacer(1, 6*mm))
 
-    # ════════════════════════════════════════
-    # 3. TRIAGE DECISION
-    # ════════════════════════════════════════
-    sec += 1
-    story.append(_pdf_section_header(str(sec), "TRIAGE DECISION", PRIMARY))
-
-    # True/false positive assessment
     if score >= 45:
         triage_verdict = "TRUE POSITIVE"
         triage_reason = (
             f"L'analyse a identifie {classification['category'].lower()} avec un score de {score}/100. "
+            f"Les indicateurs de compromission confirment une menace reelle."
         )
         triage_color = DANGER
     elif score >= 25:
         triage_verdict = "SUSPICIOUS — INVESTIGATION REQUISE"
         triage_reason = (
             f"Elements suspects detectes (score {score}/100) mais insuffisants pour confirmer. "
-            f"Investigation manuelle recommandee."
+            f"Une investigation manuelle est recommandee pour valider la menace."
         )
         triage_color = WARNING
     else:
         triage_verdict = "PROBABLE FALSE POSITIVE"
-        triage_reason = f"Score faible ({score}/100). Aucun indicateur de compromission significatif."
+        triage_reason = (
+            f"Score faible ({score}/100). Aucun indicateur de compromission significatif "
+            f"n'a ete detecte par l'analyse automatisee."
+        )
         triage_color = SUCCESS
 
-    # Triage badge
+    # Verdict banner
     triage_cell = [[Paragraph(
-        f'<font color="#ffffff" size="12"><b>{triage_verdict}</b></font>',
-        ParagraphStyle('tv', alignment=TA_CENTER))]]
-    triage_t = Table(triage_cell, colWidths=[174*mm], rowHeights=[10*mm])
+        f'<font color="#ffffff" size="14"><b>{triage_verdict}</b></font>',
+        ParagraphStyle('tv', alignment=TA_CENTER, leading=18))]]
+    triage_t = Table(triage_cell, colWidths=[CONTENT_W], rowHeights=[16*mm])
     triage_t.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), triage_color),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
     ]))
     story.append(triage_t)
-    story.append(Spacer(1, 2*mm))
+    story.append(Spacer(1, 6*mm))
+
     story.append(Paragraph(_safe(triage_reason), styles['Body']))
+    story.append(Spacer(1, 8*mm))
 
     # Scoring breakdown
     factors = risk.get("factors", [])
     if factors:
-        story.append(Spacer(1, 2*mm))
-        story.append(Paragraph("<b>Facteurs de risque (scoring breakdown)</b>", styles['SubSection']))
-        for f in factors:
-            story.append(Paragraph(f'&bull; {_safe(f)}', styles['Body']))
+        story.append(Paragraph("Facteurs de risque", styles['SubHeading']))
+        for f_item in factors:
+            story.append(Paragraph(f'&bull;  {_safe(f_item)}', styles['Bullet']))
+        story.append(Spacer(1, 8*mm))
 
-    # Authentication summary
-    story.append(Spacer(1, 2*mm))
-    story.append(Paragraph("<b>Authentification email</b>", styles['SubSection']))
+    # Authentication
+    story.append(Paragraph("Authentification email", styles['SubHeading']))
     auth_data = [["PROTOCOLE", "STATUT", "DETAILS"]]
     for proto in ['spf', 'dkim', 'dmarc']:
         item = auth.get(proto, {})
         status = item.get("status", "absent").upper()
-        details = _safe(item.get("details", ""))[:80]
+        details = _safe(item.get("details", ""))[:70]
         auth_data.append([proto.upper(), status, details])
-    t = _pdf_styled_table(auth_data, [28*mm, 24*mm, 122*mm], PRIMARY)
+    t = _pdf_styled_table_v2(auth_data, [30*mm, 28*mm, CONTENT_W - 58*mm], NAVY)
     for i, proto in enumerate(['spf', 'dkim', 'dmarc'], 1):
         status = auth.get(proto, {}).get("status", "absent")
         if status == "pass":
@@ -457,22 +528,24 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # Anomalies
     anomalies = headers_a.get("anomalies", [])
     if anomalies:
-        story.append(Spacer(1, 2*mm))
-        story.append(Paragraph("<b>Anomalies detectees</b>", styles['SubSection']))
+        story.append(Spacer(1, 8*mm))
+        story.append(Paragraph("Anomalies detectees", styles['SubHeading']))
         for a in anomalies:
-            story.append(Paragraph(f'&bull; {_safe(a)}', styles['Body']))
+            story.append(Paragraph(f'&bull;  {_safe(a)}', styles['Bullet']))
 
-    # ════════════════════════════════════════
-    # 4. ENRICHMENT FINDINGS
-    # ════════════════════════════════════════
-    story.append(Spacer(1, 6*mm))
+    story.append(PageBreak())
+
+    # ════════════════════════════════════════════════════
+    # §4. ENRICHMENT FINDINGS
+    # ════════════════════════════════════════════════════
     sec += 1
-    story.append(_pdf_section_header(str(sec), "ENRICHMENT FINDINGS", PRIMARY))
+    story.append(_pdf_section_header_v2(str(sec), "ENRICHMENT FINDINGS", NAVY, CONTENT_W))
+    story.append(Spacer(1, 4*mm))
 
     story.append(Paragraph(
-        '<i><font color="#718096">IOCs au format defange (hxxps, [.]) pour partage securise.</font></i>',
+        '<i>IOCs au format defange (hxxps, [.]) pour partage securise.</i>',
         styles['BodySmall']))
-    story.append(Spacer(1, 2*mm))
+    story.append(Spacer(1, 6*mm))
 
     # Stats bar
     url_count = iocs.get("urls_count", 0)
@@ -481,79 +554,88 @@ def generate_pdf_report(analysis: dict) -> bytes:
     kw_count = iocs.get("keywords_count", 0)
     att_count = len(atts)
 
+    stat_w = CONTENT_W / 5
     stats_data = [[
-        f"URLs: {url_count}", f"Suspectes: {suspicious_count}",
-        f"IPs: {ip_count}", f"Mots-cles: {kw_count}", f"PJ: {att_count}"
+        f"URLs\n{url_count}", f"Suspectes\n{suspicious_count}",
+        f"IPs\n{ip_count}", f"Mots-cles\n{kw_count}", f"PJ\n{att_count}"
     ]]
-    st = Table(stats_data, colWidths=[35*mm]*5)
+    st = Table(stats_data, colWidths=[stat_w]*5, rowHeights=[18*mm])
     st.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
         ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('BACKGROUND', (0, 0), (-1, -1), HexColor('#edf2f7')),
-        ('TEXTCOLOR', (0, 0), (-1, -1), PRIMARY),
-        ('BOX', (0, 0), (-1, -1), 0.4, BORDER),
-        ('INNERGRID', (0, 0), (-1, -1), 0.4, BORDER),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BACKGROUND', (0, 0), (-1, -1), LIGHT_BG),
+        ('TEXTCOLOR', (0, 0), (-1, -1), NAVY),
+        ('BOX', (0, 0), (-1, -1), 0.5, BORDER),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, BORDER),
     ]))
     story.append(st)
-    story.append(Spacer(1, 2*mm))
+    story.append(Spacer(1, 8*mm))
 
-    # 4.1 URLs
+    # URLs
     urls = iocs.get("urls", [])
     if urls:
-        story.append(Paragraph("<b>URLs detectees</b>", styles['SubSection']))
+        story.append(Paragraph("URLs detectees", styles['SubHeading']))
         url_data = [["URL (DEFANGED)", "DOMAINE", "FLAGS"]]
-        for u in urls[:15]:
+        for u in urls[:10]:
             flags = []
             if u.get("suspicious_tld"): flags.append("TLD suspect")
             if u.get("ip_based"): flags.append("IP directe")
             if u.get("url_shortener"): flags.append("Shortener")
             if u.get("mismatched_display"): flags.append("Lien masque")
             url_data.append([
-                _safe(_defang_url(u.get("url", "")))[:65],
+                Paragraph(_safe(_defang_url(u.get("url", "")))[:60],
+                          ParagraphStyle('url_cell', fontSize=8.5, leading=11, fontName='Courier')),
                 _safe(_defang_domain(u.get("domain", ""))),
                 ", ".join(flags) or "—"
             ])
-        story.append(_pdf_styled_table(url_data, [90*mm, 40*mm, 44*mm], PRIMARY))
+        story.append(_pdf_styled_table_v2(url_data, [85*mm, 42*mm, CONTENT_W - 127*mm], NAVY))
+        story.append(Spacer(1, 6*mm))
 
-    # 4.2 IPs with threat intel
+    # IPs
     ips = iocs.get("ips", [])
     if ips:
-        story.append(Paragraph("<b>Adresses IP</b>", styles['SubSection']))
+        story.append(Paragraph("Adresses IP", styles['SubHeading']))
         ip_data = [["IP (DEFANGED)", "TYPE", "THREAT INTEL"]]
         for ip_info in ips[:10]:
             priv = "Privee" if ip_info.get('is_private') else "Publique"
             ip_str = _defang_ip(ip_info.get("ip", ""))
-            vt_ref = f"VT: rechercher {ip_str}"
-            ip_data.append([ip_str, priv, vt_ref])
-        story.append(_pdf_styled_table(ip_data, [40*mm, 24*mm, 110*mm], PRIMARY))
+            ip_data.append([ip_str, priv, f"VT: rechercher {ip_str}"])
+        story.append(_pdf_styled_table_v2(ip_data, [42*mm, 28*mm, CONTENT_W - 70*mm], NAVY))
+        story.append(Spacer(1, 6*mm))
 
-    # 4.3 Received chain (hop analysis)
+    # Received chain
     received_chain = headers_a.get("received_chain", [])
     if received_chain:
-        story.append(Paragraph("<b>Chaine de transmission (Received hops)</b>", styles['SubSection']))
+        story.append(Paragraph("Chaine de transmission (Received hops)", styles['SubHeading']))
         story.append(Paragraph(
             f"L'email a traverse <b>{len(received_chain)}</b> serveur(s).",
             styles['Body']))
-        story.append(Spacer(1, 1*mm))
+        story.append(Spacer(1, 3*mm))
         hop_data = [["HOP", "IP(s)", "DETAILS"]]
         for hop in received_chain:
             ips_str = ", ".join(_defang_ip(ip) for ip in hop.get("ips_found", [])) or "—"
-            raw = _safe(hop.get("raw", ""))[:120]
-            hop_data.append([str(hop.get("hop", "")), ips_str, raw])
-        story.append(_pdf_styled_table(hop_data, [14*mm, 36*mm, 124*mm], PRIMARY))
+            raw = _safe(hop.get("raw", ""))[:100]
+            hop_data.append([
+                str(hop.get("hop", "")),
+                ips_str,
+                Paragraph(raw, ParagraphStyle('hop_d', fontSize=8, leading=10))
+            ])
+        story.append(_pdf_styled_table_v2(hop_data, [14*mm, 38*mm, CONTENT_W - 52*mm], NAVY))
+        story.append(Spacer(1, 6*mm))
 
-    # 4.4 Phishing keywords
+    # Phishing keywords
     kws = iocs.get("phishing_keywords", [])
     if kws:
-        story.append(Paragraph("<b>Mots-cles phishing</b>", styles['SubSection']))
-        story.append(Paragraph(", ".join(kws), styles['Body']))
+        story.append(Paragraph("Mots-cles phishing detectes", styles['SubHeading']))
+        kw_text = ", ".join([f"<b>{_safe(k)}</b>" for k in kws])
+        story.append(Paragraph(kw_text, styles['Body']))
+        story.append(Spacer(1, 6*mm))
 
-    # 4.5 Attachments (full hashes)
+    # Attachments
     if atts:
-        story.append(Paragraph("<b>Pieces jointes</b>", styles['SubSection']))
+        story.append(Paragraph("Pieces jointes", styles['SubHeading']))
         for att in atts:
             sus_label = "SUSPECT" if att.get("suspicious_extension") else "Normal"
             sus_color = DANGER if att.get("suspicious_extension") else SUCCESS
@@ -565,23 +647,26 @@ def generate_pdf_report(analysis: dict) -> bytes:
                 ["MD5", att.get("md5", "N/A")],
                 ["SHA256", att.get("sha256", "N/A")],
             ]
-            story.append(_pdf_info_table(att_info, sus_color))
+            story.append(_pdf_info_table_v2(att_info, sus_color, CONTENT_W))
             sha256 = att.get("sha256", "")
             if sha256 and sha256 != "N/A":
+                story.append(Spacer(1, 2*mm))
                 story.append(Paragraph(
-                    f'<font face="Courier" size="7" color="#718096">'
+                    f'<font face="Courier" size="7.5" color="#718096">'
                     f'VirusTotal: hxxps[://]www[.]virustotal[.]com/gui/file/{sha256}</font>',
                     styles['BodySmall']))
-            story.append(Spacer(1, 2*mm))
+            story.append(Spacer(1, 4*mm))
 
-    # ════════════════════════════════════════
-    # 5. MITRE ATT&CK MAPPING
-    # ════════════════════════════════════════
+    # ════════════════════════════════════════════════════
+    # §5. MITRE ATT&CK MAPPING
+    # ════════════════════════════════════════════════════
     mitre = ai.get("mitre_techniques", []) if ai else []
     tactics = ai.get("social_engineering_tactics", []) if ai else []
     if mitre or tactics or classification.get("mitre_tactics"):
+        story.append(PageBreak())
         sec += 1
-        story.append(_pdf_section_header(str(sec), "MITRE ATT&CK MAPPING", ACCENT))
+        story.append(_pdf_section_header_v2(str(sec), "MITRE ATT&CK MAPPING", ACCENT, CONTENT_W))
+        story.append(Spacer(1, 6*mm))
 
         if mitre:
             mitre_data = [["ID", "TECHNIQUE", "TACTIC", "PERTINENCE"]]
@@ -590,13 +675,14 @@ def generate_pdf_report(analysis: dict) -> bytes:
                     m.get("id", ""),
                     _safe(m.get("name", "")),
                     _safe(m.get("tactic", "Initial Access")),
-                    _safe(m.get("relevance", ""))[:50]
+                    Paragraph(_safe(m.get("relevance", ""))[:60],
+                              ParagraphStyle('mr', fontSize=8.5, leading=11))
                 ])
-            story.append(_pdf_styled_table(mitre_data, [22*mm, 45*mm, 35*mm, 72*mm], ACCENT))
+            story.append(_pdf_styled_table_v2(mitre_data, [24*mm, 44*mm, 36*mm, CONTENT_W - 104*mm], ACCENT))
+            story.append(Spacer(1, 8*mm))
 
         if tactics:
-            story.append(Spacer(1, 2*mm))
-            story.append(Paragraph("<b>Tactiques de social engineering (Cialdini)</b>", styles['SubSection']))
+            story.append(Paragraph("Tactiques de social engineering (Cialdini)", styles['SubHeading']))
             tac_data = [["TACTIQUE", "PRINCIPE CIALDINI", "EFFICACITE"]]
             for tac in tactics:
                 tac_data.append([
@@ -604,24 +690,24 @@ def generate_pdf_report(analysis: dict) -> bytes:
                     _safe(tac.get("cialdini_principle", "")),
                     _safe(tac.get("effectiveness", "")).upper()
                 ])
-            story.append(_pdf_styled_table(tac_data, [55*mm, 65*mm, 54*mm], ACCENT))
+            story.append(_pdf_styled_table_v2(tac_data, [55*mm, 60*mm, CONTENT_W - 115*mm], ACCENT))
 
         if not mitre and not tactics and classification.get("mitre_tactics"):
             story.append(Paragraph(
                 f'Techniques identifiees : {", ".join(classification["mitre_tactics"])}',
                 styles['Body']))
 
-    # ════════════════════════════════════════
-    # 6. RECOMMENDED RESPONSE
-    # ════════════════════════════════════════
+    # ════════════════════════════════════════════════════
+    # §N. RECOMMENDED RESPONSE
+    # ════════════════════════════════════════════════════
+    story.append(PageBreak())
     recs = ai.get("recommended_actions", []) if ai else []
-    rec_from_verdict = verdict.get("recommendation", "")
 
     sec += 1
-    story.append(_pdf_section_header(str(sec), "RECOMMENDED RESPONSE", PRIMARY))
+    story.append(_pdf_section_header_v2(str(sec), "RECOMMENDED RESPONSE", NAVY, CONTENT_W))
+    story.append(Spacer(1, 6*mm))
 
-    # Always provide baseline recommendations based on triage
-    baseline_recs = []
+    # Baseline recommendations
     if score >= 70:
         baseline_recs = [
             "Bloquer immediatement l'expediteur au niveau du filtre email",
@@ -649,19 +735,18 @@ def generate_pdf_report(analysis: dict) -> bytes:
             "Classer comme faux positif si confirme apres verification manuelle",
         ]
 
-    # Use AI recs if available, otherwise use baseline only (no verdict recs to avoid redundancy)
     final_recs = recs if recs else baseline_recs
+    owners = ["SOC L1", "SOC L2", "SOC L2", "RSSI", "SOC L1"]
 
     rec_data = [["#", "ACTION", "OWNER"]]
-    owners = ["SOC L1", "SOC L2", "SOC L2", "RSSI", "SOC L1"]
     for i, r in enumerate(final_recs[:6]):
         owner = owners[i] if i < len(owners) else "SOC"
-        rec_data.append([str(i + 1), _safe(r), owner])
-    story.append(_pdf_styled_table(rec_data, [10*mm, 134*mm, 30*mm], PRIMARY))
+        rec_data.append([str(i + 1), _safe(_clean_recommendation(r)), owner])
+    story.append(_pdf_styled_table_v2(rec_data, [12*mm, CONTENT_W - 44*mm, 32*mm], NAVY))
 
-    # ════════════════════════════════════════
+    # ════════════════════════════════════════════════════
     # ANNEXE A — ANALYSE IA DETAILLEE
-    # ════════════════════════════════════════
+    # ════════════════════════════════════════════════════
     if ai and not ai.get("error"):
         sem = ai.get("semantic_analysis", {})
         imp = ai.get("impersonation", {})
@@ -669,7 +754,8 @@ def generate_pdf_report(analysis: dict) -> bytes:
 
         if sem or imp or soph:
             story.append(PageBreak())
-            story.append(_pdf_section_header("A", "ANNEXE — ANALYSE IA DETAILLEE", TEXT_MUTED))
+            story.append(_pdf_section_header_v2("A", "ANNEXE — ANALYSE IA DETAILLEE", TEXT_MUTED, CONTENT_W))
+            story.append(Spacer(1, 6*mm))
 
             ai_data = [
                 ["Emotion ciblee", _safe(sem.get("target_emotion", "N/A"))],
@@ -680,50 +766,41 @@ def generate_pdf_report(analysis: dict) -> bytes:
                 ["Sophistication", f"{soph.get('level', 'N/A')} ({soph.get('score', 'N/A')}/10)"],
                 ["Confiance IA", f"{round((ai.get('ai_confidence', 0)) * 100)}%"],
             ]
-            story.append(_pdf_info_table(ai_data, ACCENT))
+            story.append(_pdf_info_table_v2(ai_data, ACCENT, CONTENT_W))
 
-    # ════════════════════════════════════════
+    # ════════════════════════════════════════════════════
     # ANNEXE B — EN-TETES BRUTS
-    # ════════════════════════════════════════
+    # ════════════════════════════════════════════════════
     x_headers = headers_a.get("x_headers", {})
     if received_chain or x_headers:
         story.append(PageBreak())
-        story.append(_pdf_section_header("B", "ANNEXE — EN-TETES BRUTS (PREUVE)", TEXT_MUTED))
+        story.append(_pdf_section_header_v2("B", "ANNEXE — EN-TETES BRUTS (PREUVE)", TEXT_MUTED, CONTENT_W))
+        story.append(Spacer(1, 4*mm))
         story.append(Paragraph(
-            '<i><font color="#718096">Conservation de preuve pour analyse independante.</font></i>',
+            '<i>Conservation de preuve pour analyse independante.</i>',
             styles['BodySmall']))
-        story.append(Spacer(1, 2*mm))
+        story.append(Spacer(1, 6*mm))
 
         if received_chain:
-            story.append(Paragraph("<b>B.1 En-tetes Received</b>", styles['SubSection']))
+            story.append(Paragraph("En-tetes Received", styles['SubHeading']))
             for hop in received_chain:
                 story.append(Paragraph(
-                    f'<font face="Courier" size="6.5" color="#4a5568">'
+                    f'<font face="Courier" size="7.5" color="#4a5568">'
                     f'Hop {hop.get("hop", "?")}: {_safe(hop.get("raw", ""))}</font>',
+                    styles['Mono']))
+                story.append(Spacer(1, 2*mm))
+
+        if x_headers:
+            story.append(Spacer(1, 6*mm))
+            story.append(Paragraph("X-Headers", styles['SubHeading']))
+            for key, value in list(x_headers.items())[:20]:
+                story.append(Paragraph(
+                    f'<font face="Courier" size="7.5" color="#4a5568">'
+                    f'{_safe(key)}: {_safe(str(value)[:140])}</font>',
                     styles['Mono']))
                 story.append(Spacer(1, 1*mm))
 
-        if x_headers:
-            story.append(Paragraph("<b>B.2 X-Headers</b>", styles['SubSection']))
-            for key, value in list(x_headers.items())[:20]:
-                story.append(Paragraph(
-                    f'<font face="Courier" size="6.5" color="#4a5568">'
-                    f'{_safe(key)}: {_safe(str(value)[:150])}</font>',
-                    styles['Mono']))
-                story.append(Spacer(1, 0.5*mm))
-
-    # ════════════════════════════════════════
-    # FOOTER
-    # ════════════════════════════════════════
-    story.append(Spacer(1, 10*mm))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
-    story.append(Spacer(1, 2*mm))
-    story.append(Paragraph(
-        f'Rapport {report_number} &mdash; Incident {incident_id} &mdash; '
-        f'Phishing Email Forensics &mdash; {now} &mdash; {classification["tlp"]} &mdash; CONFIDENTIEL',
-        styles['Footer']))
-
-    doc.build(story)
+    doc.build(story, onFirstPage=_page_footer, onLaterPages=_page_footer)
     return buf.getvalue()
 
 
@@ -743,19 +820,22 @@ def generate_docx_report(analysis: dict) -> bytes:
 
     doc = Document()
     for section in doc.sections:
-        section.top_margin = Cm(1.5)
-        section.bottom_margin = Cm(1.5)
-        section.left_margin = Cm(2)
-        section.right_margin = Cm(2)
+        section.top_margin = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.5)
 
-    PRIMARY = RGBColor(0x0f, 0x34, 0x60)
-    ACCENT = RGBColor(0xe9, 0x45, 0x60)
-    TEXT_DARK = RGBColor(0x2d, 0x37, 0x48)
+    NAVY = RGBColor(0x1a, 0x27, 0x44)
+    STEEL = RGBColor(0x3d, 0x5a, 0x80)
+    PRIMARY = NAVY
+    ACCENT = RGBColor(0xc0, 0x39, 0x2b)
+    TEXT_DARK = RGBColor(0x1a, 0x20, 0x2c)
+    TEXT_BODY = RGBColor(0x2d, 0x37, 0x48)
     TEXT_MUTED = RGBColor(0x71, 0x80, 0x96)
     WHITE = RGBColor(0xff, 0xff, 0xff)
     SUCCESS_RGB = RGBColor(0x27, 0xae, 0x60)
-    WARNING_RGB = RGBColor(0xf3, 0x9c, 0x12)
-    DANGER_RGB = RGBColor(0xe7, 0x4c, 0x3c)
+    WARNING_RGB = RGBColor(0xe6, 0x7e, 0x22)
+    DANGER_RGB = RGBColor(0xc0, 0x39, 0x2b)
 
     level_colors = {
         'CRITICAL': DANGER_RGB, 'HIGH': RGBColor(0xe6, 0x7e, 0x22),
@@ -789,24 +869,24 @@ def generate_docx_report(analysis: dict) -> bytes:
 
     def _section(text, num=None):
         p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(14)
-        p.paragraph_format.space_after = Pt(6)
+        p.paragraph_format.space_before = Pt(20)
+        p.paragraph_format.space_after = Pt(8)
         if num:
             run = p.add_run(f"{num}. ")
-            run.font.size = Pt(14)
-            run.font.color.rgb = PRIMARY
+            run.font.size = Pt(16)
+            run.font.color.rgb = NAVY
             run.bold = True
         run = p.add_run(text)
-        run.font.size = Pt(14)
-        run.font.color.rgb = PRIMARY
+        run.font.size = Pt(16)
+        run.font.color.rgb = NAVY
         run.bold = True
         border_p = doc.add_paragraph()
         border_p.paragraph_format.space_before = Pt(0)
-        border_p.paragraph_format.space_after = Pt(6)
+        border_p.paragraph_format.space_after = Pt(10)
         pPr = border_p._p.get_or_add_pPr()
         pBdr = parse_xml(
             f'<w:pBdr {nsdecls("w")}>'
-            f'  <w:bottom w:val="single" w:sz="6" w:space="1" w:color="0F3460"/>'
+            f'  <w:bottom w:val="single" w:sz="8" w:space="2" w:color="1A2744"/>'
             f'</w:pBdr>')
         pPr.append(pBdr)
 
@@ -819,19 +899,19 @@ def generate_docx_report(analysis: dict) -> bytes:
                 cell = table.rows[i].cells[j]
                 cell.text = str(val or "")
                 for p in cell.paragraphs:
-                    p.paragraph_format.space_after = Pt(2)
-                    p.paragraph_format.space_before = Pt(2)
+                    p.paragraph_format.space_after = Pt(4)
+                    p.paragraph_format.space_before = Pt(4)
                     for r in p.runs:
-                        r.font.size = Pt(9)
-                        r.font.color.rgb = TEXT_DARK
+                        r.font.size = Pt(10)
+                        r.font.color.rgb = TEXT_BODY
                 if i == 0:
-                    _set_cell_bg(cell, "0F3460")
+                    _set_cell_bg(cell, "1A2744")
                     for p in cell.paragraphs:
                         for r in p.runs:
                             r.font.color.rgb = WHITE
                             r.bold = True
                 elif i % 2 == 0:
-                    _set_cell_bg(cell, "F8F9FC")
+                    _set_cell_bg(cell, "F4F6F9")
         return table
 
     def _kv_table(data):
@@ -843,16 +923,20 @@ def generate_docx_report(analysis: dict) -> bytes:
             cv = table.rows[i].cells[1]
             cl.text = str(label)
             cv.text = str(val or "")
-            _set_cell_bg(cl, "F8F9FC")
+            _set_cell_bg(cl, "F4F6F9")
             for p in cl.paragraphs:
+                p.paragraph_format.space_after = Pt(4)
+                p.paragraph_format.space_before = Pt(4)
                 for r in p.runs:
-                    r.font.size = Pt(9)
-                    r.font.color.rgb = PRIMARY
+                    r.font.size = Pt(10)
+                    r.font.color.rgb = NAVY
                     r.bold = True
             for p in cv.paragraphs:
+                p.paragraph_format.space_after = Pt(4)
+                p.paragraph_format.space_before = Pt(4)
                 for r in p.runs:
-                    r.font.size = Pt(9)
-                    r.font.color.rgb = TEXT_DARK
+                    r.font.size = Pt(10)
+                    r.font.color.rgb = TEXT_BODY
         return table
 
     def _note(text, italic=True, size=8, color=TEXT_MUTED):
@@ -864,45 +948,61 @@ def generate_docx_report(analysis: dict) -> bytes:
             run.italic = True
 
     # ════════════════════════════════════════
-    # COVER
+    # COVER PAGE
     # ════════════════════════════════════════
+    # Spacer before title
+    for _ in range(6):
+        doc.add_paragraph()
+
+    # Title block
     banner = doc.add_table(rows=1, cols=1)
     banner.alignment = WD_TABLE_ALIGNMENT.CENTER
     cell = banner.rows[0].cells[0]
-    _set_cell_bg(cell, "0F3460")
-    cell.height = Cm(3.5)
+    _set_cell_bg(cell, "1A2744")
+    cell.height = Cm(5)
     p = cell.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_before = Pt(20)
-    run = p.add_run("RAPPORT D'INCIDENT PHISHING")
-    run.font.size = Pt(24)
+    p.paragraph_format.space_before = Pt(30)
+    run = p.add_run("RAPPORT D'INCIDENT")
+    run.font.size = Pt(28)
     run.font.color.rgb = WHITE
     run.bold = True
     p2 = cell.add_paragraph()
     p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run2 = p2.add_run(f"Rapport N° {report_number}")
-    run2.font.size = Pt(12)
-    run2.font.color.rgb = RGBColor(0xcb, 0xd5, 0xe0)
+    run2 = p2.add_run("PHISHING")
+    run2.font.size = Pt(22)
+    run2.font.color.rgb = WHITE
     run2.bold = True
-    p3 = cell.add_paragraph()
-    p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run3 = p3.add_run(f"Incident {incident_id} — {now} — {classification['tlp']}")
-    run3.font.size = Pt(10)
-    run3.font.color.rgb = RGBColor(0xcb, 0xd5, 0xe0)
     doc.add_paragraph()
 
-    # Severity
+    # Severity stripe
     sev_t = doc.add_table(rows=1, cols=1)
     sev_t.alignment = WD_TABLE_ALIGNMENT.CENTER
     sc = sev_t.rows[0].cells[0]
     color_hex = f"{level_color.red:02x}{level_color.green:02x}{level_color.blue:02x}"
     _set_cell_bg(sc, color_hex)
+    sc.height = Cm(1.5)
     p = sc.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(f"SEVERITE: {level} — {classification['priority']} — SCORE: {score}/100")
+    p.paragraph_format.space_before = Pt(8)
+    run = p.add_run(f"{level}  —  {classification['priority']}  —  SCORE {score}/100")
     run.font.size = Pt(14)
     run.font.color.rgb = WHITE
     run.bold = True
+    doc.add_paragraph()
+    doc.add_paragraph()
+
+    # Cover metadata
+    cover_meta = [
+        ("Rapport N°", report_number),
+        ("Incident", incident_id),
+        ("Date", now),
+        ("Classification", classification['tlp']),
+        ("Categorie", classification['category']),
+    ]
+    _kv_table(cover_meta)
+
+    doc.add_page_break()
 
     # ════════════════════════════════════════
     # §1. EXECUTIVE SUMMARY
@@ -912,13 +1012,14 @@ def generate_docx_report(analysis: dict) -> bytes:
 
     # One-liner
     p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(8)
     one_liner = (
         f"Severity: {level} — {classification['category']} "
         f"detecte depuis {meta.get('from', 'Inconnu')} (score {score}/100)."
     )
     run = p.add_run(one_liner)
     run.bold = True
-    run.font.size = Pt(10)
+    run.font.size = Pt(11)
 
     # Full summary
     ai_summary = ""
@@ -927,31 +1028,40 @@ def generate_docx_report(analysis: dict) -> bytes:
     summary_text = ai_summary or verdict.get("summary", "")
     if summary_text:
         p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(8)
         run = p.add_run(summary_text)
-        run.font.size = Pt(9)
-        run.font.color.rgb = TEXT_DARK
+        run.font.size = Pt(10)
+        run.font.color.rgb = TEXT_BODY
 
-    # Impact line
+    # Impact / Priority / TLP on separate lines
     p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(4)
     run = p.add_run("Impact : ")
     run.bold = True
-    run.font.size = Pt(9)
-    run = p.add_run(f"{classification['sub_category']}. ")
-    run.font.size = Pt(9)
+    run.font.size = Pt(10)
+    run = p.add_run(classification['sub_category'])
+    run.font.size = Pt(10)
+
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(4)
     run = p.add_run("Priorite : ")
     run.bold = True
-    run.font.size = Pt(9)
-    run = p.add_run(f"{classification['priority']} — {classification['severity_description']}. ")
-    run.font.size = Pt(9)
-    run = p.add_run("TLP : ")
+    run.font.size = Pt(10)
+    run = p.add_run(f"{classification['priority']} — {classification['severity_description']}")
+    run.font.size = Pt(10)
+
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(4)
+    run = p.add_run("Classification TLP : ")
     run.bold = True
-    run.font.size = Pt(9)
-    run = p.add_run(f"{classification['tlp']}.")
-    run.font.size = Pt(9)
+    run.font.size = Pt(10)
+    run = p.add_run(classification['tlp'])
+    run.font.size = Pt(10)
 
     # ════════════════════════════════════════
     # 2. ALERT DETAILS
     # ════════════════════════════════════════
+    doc.add_page_break()
     dsec += 1
     _section("ALERT DETAILS", str(dsec))
     _kv_table([
@@ -971,55 +1081,75 @@ def generate_docx_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════
     # 3. TRIAGE DECISION
     # ════════════════════════════════════════
+    doc.add_page_break()
     dsec += 1
     _section("TRIAGE DECISION", str(dsec))
 
     if score >= 45:
-        tv, tr = "TRUE POSITIVE", f"{classification['category'].lower()} avec score {score}/100."
-        tc = "E74C3C"
+        tv = "TRUE POSITIVE"
+        tr = (f"L'analyse a identifie {classification['category'].lower()} avec un score de {score}/100. "
+              f"Les indicateurs de compromission confirment une menace reelle.")
+        tc = "C0392B"
     elif score >= 25:
-        tv, tr = "SUSPICIOUS", f"Elements suspects (score {score}/100). Investigation requise."
-        tc = "F39C12"
+        tv = "SUSPICIOUS — INVESTIGATION REQUISE"
+        tr = (f"Elements suspects detectes (score {score}/100) mais insuffisants pour confirmer. "
+              f"Une investigation manuelle est recommandee pour valider la menace.")
+        tc = "E67E22"
     else:
-        tv, tr = "PROBABLE FALSE POSITIVE", f"Score faible ({score}/100). Aucun IOC significatif."
+        tv = "PROBABLE FALSE POSITIVE"
+        tr = (f"Score faible ({score}/100). Aucun indicateur de compromission significatif "
+              f"n'a ete detecte par l'analyse automatisee.")
         tc = "27AE60"
 
     triage_banner = doc.add_table(rows=1, cols=1)
     triage_banner.alignment = WD_TABLE_ALIGNMENT.CENTER
     tcell = triage_banner.rows[0].cells[0]
     _set_cell_bg(tcell, tc)
+    tcell.height = Cm(1.5)
     p = tcell.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(8)
     run = p.add_run(tv)
-    run.font.size = Pt(13)
+    run.font.size = Pt(14)
     run.font.color.rgb = WHITE
     run.bold = True
 
+    doc.add_paragraph()
     p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(10)
     run = p.add_run(tr)
-    run.font.size = Pt(9)
+    run.font.size = Pt(10)
+    run.font.color.rgb = TEXT_BODY
 
     # Scoring factors
     factors = risk.get("factors", [])
     if factors:
+        doc.add_paragraph()
         h = doc.add_paragraph()
+        h.paragraph_format.space_after = Pt(6)
         run = h.add_run("Facteurs de risque")
         run.bold = True
-        run.font.size = Pt(10)
-        for f in factors:
-            doc.add_paragraph(f, style='List Bullet')
+        run.font.size = Pt(12)
+        run.font.color.rgb = STEEL
+        for f_item in factors:
+            bp = doc.add_paragraph(f_item, style='List Bullet')
+            for r in bp.runs:
+                r.font.size = Pt(10)
 
     # Auth
+    doc.add_paragraph()
     h = doc.add_paragraph()
+    h.paragraph_format.space_after = Pt(6)
     run = h.add_run("Authentification email")
     run.bold = True
-    run.font.size = Pt(10)
+    run.font.size = Pt(12)
+    run.font.color.rgb = STEEL
 
     auth_rows = [["Protocole", "Statut", "Details"]]
     for proto in ['spf', 'dkim', 'dmarc']:
         item = auth.get(proto, {})
         auth_rows.append([proto.upper(), item.get("status", "absent").upper(),
-                         (item.get("details", "") or "")[:70]])
+                         (item.get("details", "") or "")[:60]])
     table = _grid_table(auth_rows)
     for i, proto in enumerate(['spf', 'dkim', 'dmarc'], 1):
         status = auth.get(proto, {}).get("status", "absent")
@@ -1033,12 +1163,17 @@ def generate_docx_report(analysis: dict) -> bytes:
 
     anomalies = headers_a.get("anomalies", [])
     if anomalies:
+        doc.add_paragraph()
         h = doc.add_paragraph()
-        run = h.add_run("Anomalies")
+        h.paragraph_format.space_after = Pt(6)
+        run = h.add_run("Anomalies detectees")
         run.bold = True
-        run.font.size = Pt(10)
+        run.font.size = Pt(12)
+        run.font.color.rgb = STEEL
         for a in anomalies:
-            doc.add_paragraph(a, style='List Bullet')
+            bp = doc.add_paragraph(a, style='List Bullet')
+            for r in bp.runs:
+                r.font.size = Pt(10)
 
     # ════════════════════════════════════════
     # 4. ENRICHMENT FINDINGS
@@ -1047,23 +1182,35 @@ def generate_docx_report(analysis: dict) -> bytes:
     dsec += 1
     _section("ENRICHMENT FINDINGS", str(dsec))
     _note("IOCs au format defange (hxxps, [.]) pour partage securise.")
+    doc.add_paragraph()
 
     urls = iocs.get("urls", [])
     if urls:
-        doc.add_heading("URLs detectees", level=2)
+        h = doc.add_paragraph()
+        h.paragraph_format.space_after = Pt(6)
+        run = h.add_run("URLs detectees")
+        run.bold = True
+        run.font.size = Pt(12)
+        run.font.color.rgb = STEEL
         url_rows = [["URL (defanged)", "Flags"]]
-        for u in urls[:15]:
+        for u in urls[:10]:
             flags = []
             if u.get("suspicious_tld"): flags.append("TLD suspect")
             if u.get("ip_based"): flags.append("IP directe")
             if u.get("url_shortener"): flags.append("Shortener")
             if u.get("mismatched_display"): flags.append("Lien masque")
-            url_rows.append([_defang_url(u.get("url", ""))[:65], ", ".join(flags) or "—"])
+            url_rows.append([_defang_url(u.get("url", ""))[:60], ", ".join(flags) or "—"])
         _grid_table(url_rows)
+        doc.add_paragraph()
 
     ips_list = iocs.get("ips", [])
     if ips_list:
-        doc.add_heading("Adresses IP", level=2)
+        h = doc.add_paragraph()
+        h.paragraph_format.space_after = Pt(6)
+        run = h.add_run("Adresses IP")
+        run.bold = True
+        run.font.size = Pt(12)
+        run.font.color.rgb = STEEL
         ip_rows = [["IP (defanged)", "Type", "Threat Intel"]]
         for ip_info in ips_list[:10]:
             ip_rows.append([
@@ -1072,24 +1219,45 @@ def generate_docx_report(analysis: dict) -> bytes:
                 f"VT: rechercher {_defang_ip(ip_info.get('ip', ''))}"
             ])
         _grid_table(ip_rows)
+        doc.add_paragraph()
 
     received_chain = headers_a.get("received_chain", [])
     if received_chain:
-        doc.add_heading("Chaine de transmission", level=2)
-        _note(f"L'email a traverse {len(received_chain)} serveur(s).", italic=False, size=9, color=TEXT_DARK)
+        h = doc.add_paragraph()
+        h.paragraph_format.space_after = Pt(6)
+        run = h.add_run("Chaine de transmission")
+        run.bold = True
+        run.font.size = Pt(12)
+        run.font.color.rgb = STEEL
+        _note(f"L'email a traverse {len(received_chain)} serveur(s).", italic=False, size=10, color=TEXT_BODY)
         hop_rows = [["Hop", "IP(s)", "Details"]]
         for hop in received_chain:
             ips_str = ", ".join(_defang_ip(ip) for ip in hop.get("ips_found", [])) or "—"
-            hop_rows.append([str(hop.get("hop", "")), ips_str, hop.get("raw", "")[:120]])
+            hop_rows.append([str(hop.get("hop", "")), ips_str, hop.get("raw", "")[:100]])
         _grid_table(hop_rows)
+        doc.add_paragraph()
 
     kws = iocs.get("phishing_keywords", [])
     if kws:
-        doc.add_heading("Mots-cles phishing", level=2)
-        doc.add_paragraph(", ".join(kws))
+        h = doc.add_paragraph()
+        h.paragraph_format.space_after = Pt(6)
+        run = h.add_run("Mots-cles phishing detectes")
+        run.bold = True
+        run.font.size = Pt(12)
+        run.font.color.rgb = STEEL
+        p = doc.add_paragraph()
+        run = p.add_run(", ".join(kws))
+        run.font.size = Pt(10)
+        run.bold = True
+        doc.add_paragraph()
 
     if atts:
-        doc.add_heading("Pieces jointes", level=2)
+        h = doc.add_paragraph()
+        h.paragraph_format.space_after = Pt(6)
+        run = h.add_run("Pieces jointes")
+        run.bold = True
+        run.font.size = Pt(12)
+        run.font.color.rgb = STEEL
         for att in atts:
             _kv_table([
                 ("Fichier", att.get("filename", "")),
@@ -1101,7 +1269,7 @@ def generate_docx_report(analysis: dict) -> bytes:
             ])
             sha256 = att.get("sha256", "")
             if sha256 and sha256 != "N/A":
-                _note(f"VirusTotal: hxxps[://]www[.]virustotal[.]com/gui/file/{sha256}", size=7)
+                _note(f"VirusTotal: hxxps[://]www[.]virustotal[.]com/gui/file/{sha256}", size=8)
             doc.add_paragraph()
 
     # ════════════════════════════════════════
@@ -1110,6 +1278,7 @@ def generate_docx_report(analysis: dict) -> bytes:
     mitre = ai.get("mitre_techniques", []) if ai else []
     tactics = ai.get("social_engineering_tactics", []) if ai else []
     if mitre or tactics:
+        doc.add_page_break()
         dsec += 1
         _section("MITRE ATT&CK MAPPING", str(dsec))
         if mitre:
@@ -1120,7 +1289,13 @@ def generate_docx_report(analysis: dict) -> bytes:
             _grid_table(mitre_rows)
 
         if tactics:
-            doc.add_heading("Tactiques de social engineering", level=2)
+            doc.add_paragraph()
+            h = doc.add_paragraph()
+            h.paragraph_format.space_after = Pt(6)
+            run = h.add_run("Tactiques de social engineering (Cialdini)")
+            run.bold = True
+            run.font.size = Pt(12)
+            run.font.color.rgb = STEEL
             tac_rows = [["Tactique", "Principe Cialdini", "Efficacite"]]
             for tac in tactics:
                 tac_rows.append([tac.get("tactic", ""), tac.get("cialdini_principle", ""),
@@ -1128,38 +1303,38 @@ def generate_docx_report(analysis: dict) -> bytes:
             _grid_table(tac_rows)
 
     # ════════════════════════════════════════
-    # 6. RECOMMENDED RESPONSE
+    # N. RECOMMENDED RESPONSE
     # ════════════════════════════════════════
+    doc.add_page_break()
     dsec += 1
     _section("RECOMMENDED RESPONSE", str(dsec))
 
     recs = ai.get("recommended_actions", []) if ai else []
-    rec_from_verdict = verdict.get("recommendation", "")
     if score >= 70:
         baseline = [
-            "Bloquer l'expediteur au niveau du filtre email",
-            "Isoler et supprimer l'email de toutes les boites",
-            "Verifier les logs pour detecter des clics",
-            "Notifier le RSSI et escalader",
-            "Ajouter les IOCs aux listes de blocage",
+            "Bloquer immediatement l'expediteur au niveau du filtre email",
+            "Isoler et supprimer l'email de toutes les boites de reception",
+            "Verifier les logs d'acces pour detecter des clics sur les liens malveillants",
+            "Notifier le RSSI et escalader en incident de securite",
+            "Ajouter les IOCs (URLs, IPs, domaines) aux listes de blocage",
         ]
     elif score >= 45:
         baseline = [
-            "Mettre l'email en quarantaine",
-            "Verifier les logs pour autres destinataires",
-            "Ajouter les IOCs aux watchlists",
-            "Sensibiliser les destinataires",
+            "Mettre l'email en quarantaine pour analyse approfondie",
+            "Verifier les logs pour identifier d'autres destinataires",
+            "Ajouter les IOCs suspects aux watchlists",
+            "Sensibiliser les destinataires au risque de phishing",
         ]
     elif score >= 25:
         baseline = [
-            "Surveiller l'expediteur",
-            "Sensibiliser le destinataire",
-            "Documenter l'alerte",
+            "Surveiller l'expediteur pour activite repetee",
+            "Sensibiliser le destinataire aux signaux de phishing",
+            "Documenter l'alerte pour reference future",
         ]
     else:
         baseline = [
             "Aucune action immediate requise",
-            "Classer comme faux positif si confirme",
+            "Classer comme faux positif si confirme apres verification manuelle",
         ]
 
     final_recs = recs if recs else baseline
@@ -1168,7 +1343,7 @@ def generate_docx_report(analysis: dict) -> bytes:
     rec_rows = [["#", "Action", "Owner"]]
     for i, r in enumerate(final_recs[:6]):
         owner = owners[i] if i < len(owners) else "SOC"
-        rec_rows.append([str(i + 1), r, owner])
+        rec_rows.append([str(i + 1), _clean_recommendation(r), owner])
     _grid_table(rec_rows)
 
     # ════════════════════════════════════════
@@ -1185,6 +1360,8 @@ def generate_docx_report(analysis: dict) -> bytes:
                 ("Emotion ciblee", sem.get("target_emotion", "N/A")),
                 ("Pretexte", sem.get("pretext", imp.get("pretext", "N/A"))),
                 ("Entite usurpee", imp.get("impersonated_entity", "N/A")),
+                ("Qualite usurpation", f"{imp.get('impersonation_quality', 'N/A')}/10"),
+                ("Credibilite", f"{sem.get('credibility_assessment', 'N/A')}/10"),
                 ("Sophistication", f"{soph.get('level', 'N/A')} ({soph.get('score', 'N/A')}/10)"),
                 ("Confiance IA", f"{round(ai.get('ai_confidence', 0) * 100)}%"),
             ])
@@ -1197,22 +1374,36 @@ def generate_docx_report(analysis: dict) -> bytes:
         doc.add_page_break()
         _section("ANNEXE — EN-TETES BRUTS (PREUVE)", "B")
         _note("Conservation de preuve pour analyse independante.")
+        doc.add_paragraph()
 
         if received_chain:
-            doc.add_heading("B.1 En-tetes Received", level=2)
+            h = doc.add_paragraph()
+            h.paragraph_format.space_after = Pt(6)
+            run = h.add_run("En-tetes Received")
+            run.bold = True
+            run.font.size = Pt(12)
+            run.font.color.rgb = STEEL
             for hop in received_chain:
                 p = doc.add_paragraph()
+                p.paragraph_format.space_after = Pt(4)
                 run = p.add_run(f"Hop {hop.get('hop', '?')}: {hop.get('raw', '')}")
-                run.font.size = Pt(7)
+                run.font.size = Pt(8)
                 run.font.name = 'Courier New'
                 run.font.color.rgb = RGBColor(0x4a, 0x55, 0x68)
 
         if x_headers:
-            doc.add_heading("B.2 X-Headers", level=2)
+            doc.add_paragraph()
+            h = doc.add_paragraph()
+            h.paragraph_format.space_after = Pt(6)
+            run = h.add_run("X-Headers")
+            run.bold = True
+            run.font.size = Pt(12)
+            run.font.color.rgb = STEEL
             for key, value in list(x_headers.items())[:20]:
                 p = doc.add_paragraph()
-                run = p.add_run(f"{key}: {str(value)[:150]}")
-                run.font.size = Pt(7)
+                p.paragraph_format.space_after = Pt(3)
+                run = p.add_run(f"{key}: {str(value)[:140]}")
+                run.font.size = Pt(8)
                 run.font.name = 'Courier New'
                 run.font.color.rgb = RGBColor(0x4a, 0x55, 0x68)
 
@@ -1220,11 +1411,12 @@ def generate_docx_report(analysis: dict) -> bytes:
     # FOOTER
     # ════════════════════════════════════════
     doc.add_paragraph()
+    doc.add_paragraph()
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = footer.add_run(
-        f"Rapport {report_number} — Incident {incident_id} — "
-        f"Phishing Email Forensics — {now} — {classification['tlp']} — CONFIDENTIEL")
+        f"Rapport {report_number}  |  Incident {incident_id}  |  "
+        f"Phishing Email Forensics  |  {now}  |  {classification['tlp']}  |  CONFIDENTIEL")
     run.font.size = Pt(8)
     run.font.color.rgb = TEXT_MUTED
 
@@ -1238,59 +1430,79 @@ def generate_docx_report(analysis: dict) -> bytes:
 # ════════════════════════════════════════
 
 def _pdf_section_header(num, title, color):
-    from reportlab.lib.units import mm
-    from reportlab.platypus import Table, TableStyle, Paragraph
-    from reportlab.lib.styles import ParagraphStyle
+    """Legacy — kept for backward compatibility."""
+    return _pdf_section_header_v2(num, title, color, 166)
 
-    style = ParagraphStyle('sh', fontSize=12, fontName='Helvetica-Bold',
-                           textColor=color, leading=16)
+
+def _pdf_section_header_v2(num, title, color, content_w):
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.colors import HexColor
+
+    style = ParagraphStyle('sh2', fontSize=14, fontName='Helvetica-Bold',
+                           textColor=color, leading=18)
     content = Paragraph(f"{num}. {title}", style)
-    t = Table([[content]], colWidths=[174*mm], rowHeights=[10*mm])
+    t = Table([[content]], colWidths=[content_w], rowHeights=[12*mm])
     t.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-        ('LINEBELOW', (0, 0), (-1, -1), 1.5, color),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LINEBELOW', (0, 0), (-1, -1), 2, color),
     ]))
     return t
 
 
 def _pdf_styled_table(data, col_widths, header_color):
+    """Legacy — kept for backward compatibility."""
+    return _pdf_styled_table_v2(data, col_widths, header_color)
+
+
+def _pdf_styled_table_v2(data, col_widths, header_color):
     from reportlab.lib.colors import HexColor
     from reportlab.platypus import Table, TableStyle
 
     t = Table(data, colWidths=col_widths)
     t.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('BACKGROUND', (0, 0), (-1, 0), header_color),
         ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#ffffff')),
-        ('GRID', (0, 0), (-1, -1), 0.3, HexColor('#e2e8f0')),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ('LEFTPADDING', (0, 0), (-1, -1), 6),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HexColor('#ffffff'), HexColor('#f8f9fc')]),
+        ('GRID', (0, 0), (-1, -1), 0.4, HexColor('#dce1e8')),
+        ('TOPPADDING', (0, 0), (-1, -1), 7),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HexColor('#ffffff'), HexColor('#f4f6f9')]),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
     return t
 
 
 def _pdf_info_table(data, label_color):
+    """Legacy — kept for backward compatibility."""
+    return _pdf_info_table_v2(data, label_color, 174)
+
+
+def _pdf_info_table_v2(data, label_color, content_w):
     from reportlab.lib.units import mm
     from reportlab.lib.colors import HexColor
     from reportlab.platypus import Table, TableStyle
 
-    t = Table(data, colWidths=[42*mm, 132*mm])
+    label_w = 46*mm
+    value_w = content_w - label_w
+    t = Table(data, colWidths=[label_w, value_w])
     t.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
         ('TEXTCOLOR', (0, 0), (0, -1), label_color),
         ('TEXTCOLOR', (1, 0), (1, -1), HexColor('#2d3748')),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('GRID', (0, 0), (-1, -1), 0.4, HexColor('#e2e8f0')),
-        ('BACKGROUND', (0, 0), (0, -1), HexColor('#f8f9fc')),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ('LEFTPADDING', (0, 0), (-1, -1), 8),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 0.4, HexColor('#dce1e8')),
+        ('BACKGROUND', (0, 0), (0, -1), HexColor('#f4f6f9')),
+        ('TOPPADDING', (0, 0), (-1, -1), 7),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
     ]))
     return t
