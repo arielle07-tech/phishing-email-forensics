@@ -525,25 +525,19 @@
 <div class="container hidden" id="page-analysis">
   <div id="analysisContent">
     <div id="analysisWelcome">
-      <div class="overview-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
-        <div class="stat-card" onclick="document.getElementById('fileInput').click()" style="cursor:pointer">
-          <div class="stat-value" style="font-size:24px">&#x1f4c2;</div>
-          <div class="stat-label">Importer .eml</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+        <div class="upload-area" onclick="document.getElementById('emlInput').click()" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" style="margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:120px;border:2px dashed var(--border2);border-radius:8px;cursor:pointer;transition:border-color 0.2s,background 0.2s" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(59,130,246,0.05)'" onmouseout="this.style.borderColor='var(--border2)';this.style.background='transparent'">
+          <div style="font-size:28px;margin-bottom:8px;opacity:0.6">&#x1f4e5;</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text)">Deposer ou cliquer pour importer</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:4px">Formats : .eml, .msg, .txt</div>
         </div>
-        <div class="stat-card" onclick="document.getElementById('pasteZone').style.display=document.getElementById('pasteZone').style.display==='none'?'block':'none'" style="cursor:pointer">
-          <div class="stat-value" style="font-size:24px">&#x1f4cb;</div>
-          <div class="stat-label">Coller texte</div>
-        </div>
-      </div>
-
-      <div id="pasteZone" style="display:none;margin-bottom:24px">
-        <div class="panel"><div class="panel-header">Coller le contenu brut d'un email</div><div class="panel-body">
-          <textarea id="welcomePasteArea" rows="8" style="width:100%;background:var(--bg1);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:12px;font-family:monospace;font-size:12px;resize:vertical" placeholder="Collez ici le contenu brut d'un email (headers + body)..."></textarea>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn btn-primary" onclick="analyzeWelcomePaste()">Analyser le texte</button>
-            <button class="btn" onclick="document.getElementById('welcomePasteArea').value='';document.getElementById('pasteZone').style.display='none'">Annuler</button>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <textarea id="welcomePasteArea" rows="4" style="flex:1;background:var(--bg1);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:'Consolas',monospace;font-size:11px;resize:none" placeholder="Collez ici le contenu brut d'un email (headers + body)..."></textarea>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="analyzeWelcomePaste()" style="flex:1">Analyser le texte</button>
+            <button class="btn" onclick="document.getElementById('welcomePasteArea').value=''" style="width:80px">Effacer</button>
           </div>
-        </div></div>
+        </div>
       </div>
 
       <div class="overview-grid" style="grid-template-columns:1fr 1fr;gap:16px">
