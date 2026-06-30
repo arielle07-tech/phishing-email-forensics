@@ -72,6 +72,20 @@ def _generate_incident_id(analysis: dict) -> str:
     return f"INC-{datetime.now().strftime('%Y')}-{h}"
 
 
+def _generate_report_number(analysis: dict) -> str:
+    """Génère un numéro de rapport unique pour suivi (RPT-YYYYMMDD-XXXXXX)."""
+    meta = analysis.get("metadata", {})
+    seed = f"{meta.get('message_id', '')}{datetime.now().isoformat()}{meta.get('from', '')}"
+    h = hashlib.md5(seed.encode()).hexdigest()[:6].upper()
+    return f"RPT-{datetime.now().strftime('%Y%m%d')}-{h}"
+
+
+def _clean_recommendation(text: str) -> str:
+    """Supprime la numérotation en début de recommandation (ex: '1. ', '2. ')."""
+    import re
+    return re.sub(r'^\d+[\.\)\-]\s*', '', text.strip())
+
+
 def _classify_incident(analysis: dict) -> dict:
     ai = analysis.get("ai_analysis", {})
     iocs = analysis.get("iocs", {})
@@ -248,22 +262,25 @@ def generate_pdf_report(analysis: dict) -> bytes:
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
     color = level_colors.get(level, TEXT_MUTED)
     incident_id = _generate_incident_id(analysis)
+    report_number = _generate_report_number(analysis)
     classification = _classify_incident(analysis)
     timeline = _build_timeline(analysis)
     exec_summary = _build_executive_summary(analysis, classification, incident_id)
+    sec = 0  # dynamic section counter
 
     # ════════════════════════════════════════
     # HEADER BANNER
     # ════════════════════════════════════════
-    banner = Table([['']], colWidths=[174*mm], rowHeights=[42*mm])
+    banner = Table([['']], colWidths=[174*mm], rowHeights=[48*mm])
     banner.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), PRIMARY),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]))
     story.append(banner)
-    story.append(Spacer(1, -38*mm))
+    story.append(Spacer(1, -44*mm))
     story.append(Paragraph("RAPPORT D'INCIDENT PHISHING", styles['CoverTitle']))
-    story.append(Paragraph(f"{incident_id} &mdash; {now} &mdash; {classification['tlp']}", styles['CoverSub']))
+    story.append(Paragraph(f"Rapport N° {report_number}", styles['CoverSub']))
+    story.append(Paragraph(f"Incident {incident_id} &mdash; {now} &mdash; {classification['tlp']}", styles['CoverSub']))
     story.append(Spacer(1, 8*mm))
 
     # Severity badge
@@ -282,9 +299,32 @@ def generate_pdf_report(analysis: dict) -> bytes:
     story.append(Spacer(1, 4*mm))
 
     # ════════════════════════════════════════
-    # 1. EXECUTIVE SUMMARY  ★ En premier
+    # SOMMAIRE (table of contents)
     # ════════════════════════════════════════
-    story.append(_pdf_section_header("1", "EXECUTIVE SUMMARY", PRIMARY))
+    # Build section list dynamically
+    has_mitre = bool((ai.get("mitre_techniques", []) if ai else []) or
+                     (ai.get("social_engineering_tactics", []) if ai else []) or
+                     classification.get("mitre_tactics"))
+    toc_items = [
+        "Executive Summary",
+        "Alert Details",
+        "Triage Decision",
+        "Enrichment Findings",
+    ]
+    if has_mitre:
+        toc_items.append("MITRE ATT&CK Mapping")
+    toc_items.append("Recommended Response")
+
+    toc_text = " &mdash; ".join([f"<b>{i+1}.</b> {t}" for i, t in enumerate(toc_items)])
+    toc_text += " &mdash; <b>A/B.</b> Annexes"
+    story.append(Paragraph(toc_text, styles['BodySmall']))
+    story.append(Spacer(1, 4*mm))
+
+    # ════════════════════════════════════════
+    # §1. EXECUTIVE SUMMARY
+    # ════════════════════════════════════════
+    sec += 1
+    story.append(_pdf_section_header(str(sec), "EXECUTIVE SUMMARY", PRIMARY))
 
     # One-liner box (highlighted)
     one_liner = (
@@ -324,11 +364,13 @@ def generate_pdf_report(analysis: dict) -> bytes:
     story.append(Paragraph(impact_text, styles['Body']))
 
     # ════════════════════════════════════════
-    # 2. ALERT DETAILS
+    # §2. ALERT DETAILS
     # ════════════════════════════════════════
-    story.append(_pdf_section_header("2", "ALERT DETAILS", PRIMARY))
+    sec += 1
+    story.append(_pdf_section_header(str(sec), "ALERT DETAILS", PRIMARY))
     alert_data = [
-        ["Identifiant", incident_id],
+        ["N° Rapport", report_number],
+        ["N° Incident", incident_id],
         ["Date du rapport", now],
         ["Sujet", _safe(meta.get("subject", "N/A"))],
         ["Expediteur", _safe(meta.get("from", "N/A"))],
@@ -352,7 +394,8 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════
     # 3. TRIAGE DECISION
     # ════════════════════════════════════════
-    story.append(_pdf_section_header("3", "TRIAGE DECISION", PRIMARY))
+    sec += 1
+    story.append(_pdf_section_header(str(sec), "TRIAGE DECISION", PRIMARY))
 
     # True/false positive assessment
     if score >= 45:
@@ -429,7 +472,8 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # 4. ENRICHMENT FINDINGS
     # ════════════════════════════════════════
     story.append(PageBreak())
-    story.append(_pdf_section_header("4", "ENRICHMENT FINDINGS", PRIMARY))
+    sec += 1
+    story.append(_pdf_section_header(str(sec), "ENRICHMENT FINDINGS", PRIMARY))
 
     story.append(Paragraph(
         '<i><font color="#718096">IOCs au format defange (hxxps, [.]) pour partage securise.</font></i>',
@@ -541,8 +585,9 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════
     mitre = ai.get("mitre_techniques", []) if ai else []
     tactics = ai.get("social_engineering_tactics", []) if ai else []
-    if mitre or tactics:
-        story.append(_pdf_section_header("5", "MITRE ATT&CK MAPPING", ACCENT))
+    if mitre or tactics or classification.get("mitre_tactics"):
+        sec += 1
+        story.append(_pdf_section_header(str(sec), "MITRE ATT&CK MAPPING", ACCENT))
 
         if mitre:
             mitre_data = [["ID", "TECHNIQUE", "TACTIC", "PERTINENCE"]]
@@ -566,10 +611,8 @@ def generate_pdf_report(analysis: dict) -> bytes:
                     _safe(tac.get("effectiveness", "")).upper()
                 ])
             story.append(_pdf_styled_table(tac_data, [55*mm, 65*mm, 54*mm], ACCENT))
-    else:
-        # No AI — still show classification-based MITRE
-        if classification["mitre_tactics"]:
-            story.append(_pdf_section_header("5", "MITRE ATT&CK MAPPING", ACCENT))
+
+        if not mitre and not tactics and classification.get("mitre_tactics"):
             story.append(Paragraph(
                 f'Techniques identifiees : {", ".join(classification["mitre_tactics"])}',
                 styles['Body']))
@@ -580,7 +623,8 @@ def generate_pdf_report(analysis: dict) -> bytes:
     recs = ai.get("recommended_actions", []) if ai else []
     rec_from_verdict = verdict.get("recommendation", "")
 
-    story.append(_pdf_section_header("6", "RECOMMENDED RESPONSE", PRIMARY))
+    sec += 1
+    story.append(_pdf_section_header(str(sec), "RECOMMENDED RESPONSE", PRIMARY))
 
     # Always provide baseline recommendations based on triage
     baseline_recs = []
@@ -615,12 +659,22 @@ def generate_pdf_report(analysis: dict) -> bytes:
     final_recs = recs if recs else baseline_recs
     if rec_from_verdict and not recs:
         for line in rec_from_verdict.split("\n"):
-            if line.strip() and line.strip() not in final_recs:
-                final_recs.append(line.strip())
+            cleaned = _clean_recommendation(line)
+            if cleaned and cleaned not in final_recs:
+                final_recs.append(cleaned)
+
+    # Deduplicate and clean all recommendations
+    seen = set()
+    deduped_recs = []
+    for r in final_recs:
+        cleaned = _clean_recommendation(r)
+        if cleaned and cleaned.lower() not in seen:
+            seen.add(cleaned.lower())
+            deduped_recs.append(cleaned)
 
     rec_data = [["#", "ACTION", "OWNER"]]
     owners = ["SOC L1", "SOC L2", "SOC L2", "RSSI", "SOC L1"]
-    for i, r in enumerate(final_recs[:8]):
+    for i, r in enumerate(deduped_recs[:8]):
         owner = owners[i] if i < len(owners) else "SOC"
         rec_data.append([str(i + 1), _safe(r), owner])
     story.append(_pdf_styled_table(rec_data, [10*mm, 134*mm, 30*mm], PRIMARY))
@@ -685,8 +739,8 @@ def generate_pdf_report(analysis: dict) -> bytes:
     story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
     story.append(Spacer(1, 2*mm))
     story.append(Paragraph(
-        f'Rapport genere par <b>Phishing Email Forensics</b> &mdash; '
-        f'{incident_id} &mdash; {now} &mdash; {classification["tlp"]} &mdash; CONFIDENTIEL',
+        f'Rapport {report_number} &mdash; Incident {incident_id} &mdash; '
+        f'Phishing Email Forensics &mdash; {now} &mdash; {classification["tlp"]} &mdash; CONFIDENTIEL',
         styles['Footer']))
 
     doc.build(story)
@@ -743,8 +797,10 @@ def generate_docx_report(analysis: dict) -> bytes:
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
     level_color = level_colors.get(level, TEXT_MUTED)
     incident_id = _generate_incident_id(analysis)
+    report_number = _generate_report_number(analysis)
     classification = _classify_incident(analysis)
     timeline = _build_timeline(analysis)
+    dsec = 0  # dynamic section counter
 
     # ── Helpers ──
     def _set_cell_bg(cell, color_hex):
@@ -844,9 +900,15 @@ def generate_docx_report(analysis: dict) -> bytes:
     run.bold = True
     p2 = cell.add_paragraph()
     p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run2 = p2.add_run(f"{incident_id} — {now} — {classification['tlp']}")
-    run2.font.size = Pt(11)
+    run2 = p2.add_run(f"Rapport N° {report_number}")
+    run2.font.size = Pt(12)
     run2.font.color.rgb = RGBColor(0xcb, 0xd5, 0xe0)
+    run2.bold = True
+    p3 = cell.add_paragraph()
+    p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run3 = p3.add_run(f"Incident {incident_id} — {now} — {classification['tlp']}")
+    run3.font.size = Pt(10)
+    run3.font.color.rgb = RGBColor(0xcb, 0xd5, 0xe0)
     doc.add_paragraph()
 
     # Severity
@@ -863,9 +925,10 @@ def generate_docx_report(analysis: dict) -> bytes:
     run.bold = True
 
     # ════════════════════════════════════════
-    # 1. EXECUTIVE SUMMARY
+    # §1. EXECUTIVE SUMMARY
     # ════════════════════════════════════════
-    _section("EXECUTIVE SUMMARY", "1")
+    dsec += 1
+    _section("EXECUTIVE SUMMARY", str(dsec))
 
     # One-liner
     p = doc.add_paragraph()
@@ -909,9 +972,11 @@ def generate_docx_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════
     # 2. ALERT DETAILS
     # ════════════════════════════════════════
-    _section("ALERT DETAILS", "2")
+    dsec += 1
+    _section("ALERT DETAILS", str(dsec))
     _kv_table([
-        ("Identifiant", incident_id),
+        ("N° Rapport", report_number),
+        ("N° Incident", incident_id),
         ("Date du rapport", now),
         ("Sujet", meta.get("subject", "N/A")),
         ("Expediteur", meta.get("from", "N/A")),
@@ -939,7 +1004,8 @@ def generate_docx_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════
     # 3. TRIAGE DECISION
     # ════════════════════════════════════════
-    _section("TRIAGE DECISION", "3")
+    dsec += 1
+    _section("TRIAGE DECISION", str(dsec))
 
     if score >= 45:
         tv, tr = "TRUE POSITIVE", f"{classification['category'].lower()} avec score {score}/100."
@@ -1011,7 +1077,8 @@ def generate_docx_report(analysis: dict) -> bytes:
     # 4. ENRICHMENT FINDINGS
     # ════════════════════════════════════════
     doc.add_page_break()
-    _section("ENRICHMENT FINDINGS", "4")
+    dsec += 1
+    _section("ENRICHMENT FINDINGS", str(dsec))
     _note("IOCs au format defange (hxxps, [.]) pour partage securise.")
 
     urls = iocs.get("urls", [])
@@ -1076,7 +1143,8 @@ def generate_docx_report(analysis: dict) -> bytes:
     mitre = ai.get("mitre_techniques", []) if ai else []
     tactics = ai.get("social_engineering_tactics", []) if ai else []
     if mitre or tactics:
-        _section("MITRE ATT&CK MAPPING", "5")
+        dsec += 1
+        _section("MITRE ATT&CK MAPPING", str(dsec))
         if mitre:
             mitre_rows = [["ID", "Technique", "Tactic", "Pertinence"]]
             for m in mitre:
@@ -1095,9 +1163,11 @@ def generate_docx_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════
     # 6. RECOMMENDED RESPONSE
     # ════════════════════════════════════════
-    _section("RECOMMENDED RESPONSE", "6")
+    dsec += 1
+    _section("RECOMMENDED RESPONSE", str(dsec))
 
     recs = ai.get("recommended_actions", []) if ai else []
+    rec_from_verdict = verdict.get("recommendation", "")
     if score >= 70:
         baseline = [
             "Bloquer l'expediteur au niveau du filtre email",
@@ -1126,9 +1196,24 @@ def generate_docx_report(analysis: dict) -> bytes:
         ]
 
     final_recs = recs if recs else baseline
+    if rec_from_verdict and not recs:
+        for line in rec_from_verdict.split("\n"):
+            cleaned = _clean_recommendation(line)
+            if cleaned and cleaned not in final_recs:
+                final_recs.append(cleaned)
+
+    # Deduplicate and clean
+    seen = set()
+    deduped = []
+    for r in final_recs:
+        cleaned = _clean_recommendation(r)
+        if cleaned and cleaned.lower() not in seen:
+            seen.add(cleaned.lower())
+            deduped.append(cleaned)
+
     owners = ["SOC L1", "SOC L2", "SOC L2", "RSSI", "SOC L1"]
     rec_rows = [["#", "Action", "Owner"]]
-    for i, r in enumerate(final_recs[:8]):
+    for i, r in enumerate(deduped[:8]):
         owner = owners[i] if i < len(owners) else "SOC"
         rec_rows.append([str(i + 1), r, owner])
     _grid_table(rec_rows)
@@ -1185,8 +1270,8 @@ def generate_docx_report(analysis: dict) -> bytes:
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = footer.add_run(
-        f"Rapport genere par Phishing Email Forensics — "
-        f"{incident_id} — {now} — {classification['tlp']} — CONFIDENTIEL")
+        f"Rapport {report_number} — Incident {incident_id} — "
+        f"Phishing Email Forensics — {now} — {classification['tlp']} — CONFIDENTIEL")
     run.font.size = Pt(8)
     run.font.color.rgb = TEXT_MUTED
 
