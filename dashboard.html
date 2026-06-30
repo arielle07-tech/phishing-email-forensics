@@ -510,9 +510,44 @@
 <!-- ══════════ ANALYSIS TAB ══════════ -->
 <div class="container hidden" id="page-analysis">
   <div id="analysisContent">
-    <div class="empty-state" style="padding:80px">
-      <div style="font-size:36px;margin-bottom:16px;opacity:.3">&#x1f50d;</div>
-      Aucune analyse chargee — importez un .eml ou lancez la demo
+    <div id="analysisWelcome">
+      <div class="overview-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
+        <div class="stat-card" onclick="document.getElementById('fileInput').click()" style="cursor:pointer">
+          <div class="stat-value" style="font-size:24px">&#x1f4c2;</div>
+          <div class="stat-label">Importer .eml</div>
+        </div>
+        <div class="stat-card" onclick="document.getElementById('pasteZone').style.display=document.getElementById('pasteZone').style.display==='none'?'block':'none'" style="cursor:pointer">
+          <div class="stat-value" style="font-size:24px">&#x1f4cb;</div>
+          <div class="stat-label">Coller texte</div>
+        </div>
+        <div class="stat-card" onclick="launchDemo(true)" style="cursor:pointer">
+          <div class="stat-value" style="font-size:24px">&#x1f916;</div>
+          <div class="stat-label">Demo IA</div>
+        </div>
+        <div class="stat-card" onclick="launchDemo(false)" style="cursor:pointer">
+          <div class="stat-value" style="font-size:24px">&#x1f50d;</div>
+          <div class="stat-label">Demo Offline</div>
+        </div>
+      </div>
+
+      <div id="pasteZone" style="display:none;margin-bottom:24px">
+        <div class="panel"><div class="panel-header">Coller le contenu brut d'un email</div><div class="panel-body">
+          <textarea id="welcomePasteArea" rows="8" style="width:100%;background:var(--bg1);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:12px;font-family:monospace;font-size:12px;resize:vertical" placeholder="Collez ici le contenu brut d'un email (headers + body)..."></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-primary" onclick="analyzeWelcomePaste()">Analyser le texte</button>
+            <button class="btn" onclick="document.getElementById('welcomePasteArea').value='';document.getElementById('pasteZone').style.display='none'">Annuler</button>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="overview-grid" style="grid-template-columns:1fr 1fr;gap:16px">
+        <div class="panel"><div class="panel-header">Statistiques</div><div class="panel-body" id="welcomeStats">
+          <div style="color:var(--text3);text-align:center;padding:20px">Chargement...</div>
+        </div></div>
+        <div class="panel"><div class="panel-header">Dernieres analyses</div><div class="panel-body" id="welcomeRecent">
+          <div style="color:var(--text3);text-align:center;padding:20px">Aucune analyse</div>
+        </div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -635,6 +670,111 @@ function switchTab(tab) {
   ['overview','analysis','history','tickets'].forEach(p => {
     document.getElementById('page-' + p).classList.toggle('hidden', p !== tab);
   });
+}
+
+// ══════════ WELCOME SCREEN ══════════
+function renderWelcomeScreen() {
+  const statsEl = document.getElementById('welcomeStats');
+  const recentEl = document.getElementById('welcomeRecent');
+  if (!statsEl) return;
+
+  const total = analysisHistory.length;
+  const critical = analysisHistory.filter(e => e.level === 'CRITICAL').length;
+  const high = analysisHistory.filter(e => e.level === 'HIGH').length;
+  const medium = analysisHistory.filter(e => e.level === 'MEDIUM').length;
+  const low = analysisHistory.filter(e => e.level === 'LOW' || e.level === 'INFO').length;
+  const ticketCount = tickets.filter(t => t.status !== 'closed').length;
+
+  statsEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="text-align:center;padding:12px;background:var(--bg1);border-radius:8px">
+        <div style="font-size:28px;font-weight:700;color:var(--accent)">${total}</div>
+        <div style="font-size:11px;color:var(--text3)">Analyses totales</div>
+      </div>
+      <div style="text-align:center;padding:12px;background:var(--bg1);border-radius:8px">
+        <div style="font-size:28px;font-weight:700;color:var(--warning)">${ticketCount}</div>
+        <div style="font-size:11px;color:var(--text3)">Tickets ouverts</div>
+      </div>
+      <div style="text-align:center;padding:12px;background:var(--bg1);border-radius:8px">
+        <div style="font-size:16px;font-weight:600">
+          <span style="color:var(--danger)">${critical}</span> /
+          <span style="color:var(--warning)">${high}</span> /
+          <span style="color:#f0ad4e">${medium}</span> /
+          <span style="color:var(--success)">${low}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3)">Crit / High / Med / Low</div>
+      </div>
+      <div style="text-align:center;padding:12px;background:var(--bg1);border-radius:8px">
+        <div style="font-size:16px;font-weight:600;color:${integrationStatus.connected?'var(--success)':'var(--text3)'}">
+          ${integrationStatus.connected ? '&#x2705; ' + (integrationStatus.display_name||'') : '&#x26aa; Local'}
+        </div>
+        <div style="font-size:11px;color:var(--text3)">Integration</div>
+      </div>
+    </div>`;
+
+  if (total === 0) {
+    recentEl.innerHTML = '<div style="color:var(--text3);text-align:center;padding:20px">Aucune analyse — lancez la demo ou importez un .eml</div>';
+    return;
+  }
+
+  const recent = analysisHistory.slice(0, 5);
+  recentEl.innerHTML = recent.map(e => {
+    const levelColor = {'CRITICAL':'var(--danger)','HIGH':'var(--warning)','MEDIUM':'#f0ad4e','LOW':'var(--success)','INFO':'var(--text3)'}[e.level] || 'var(--text3)';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="loadFromHistory(${e.id})">
+      <span style="color:${levelColor};font-weight:700;font-size:11px;min-width:60px">${e.level}</span>
+      <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.subject||'Sans sujet')}</span>
+      <span style="font-size:11px;color:var(--text3)">${new Date(e.date).toLocaleDateString('fr-FR')}</span>
+    </div>`;
+  }).join('');
+}
+
+function analyzeWelcomePaste() {
+  const text = document.getElementById('welcomePasteArea').value.trim();
+  if (!text) { alert('Collez le contenu d\'un email'); return; }
+  // Réutiliser la logique existante du paste
+  const pasteArea = document.getElementById('pasteArea');
+  if (pasteArea) { pasteArea.value = text; }
+  analyzePastedText(text);
+}
+
+function resetAnalysisView() {
+  currentAnalysis = null;
+  // Masquer les boutons header
+  document.getElementById('btnIncidentPDF').style.display = 'none';
+  document.getElementById('btnIncidentDOCX').style.display = 'none';
+  document.getElementById('btnCreateTicket').style.display = 'none';
+  // Restaurer le welcome
+  const el = document.getElementById('analysisContent');
+  el.innerHTML = `<div id="analysisWelcome">
+    <div class="overview-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
+      <div class="stat-card" onclick="document.getElementById('fileInput').click()" style="cursor:pointer">
+        <div class="stat-value" style="font-size:24px">&#x1f4c2;</div><div class="stat-label">Importer .eml</div>
+      </div>
+      <div class="stat-card" onclick="document.getElementById('pasteZone').style.display=document.getElementById('pasteZone').style.display==='none'?'block':'none'" style="cursor:pointer">
+        <div class="stat-value" style="font-size:24px">&#x1f4cb;</div><div class="stat-label">Coller texte</div>
+      </div>
+      <div class="stat-card" onclick="launchDemo(true)" style="cursor:pointer">
+        <div class="stat-value" style="font-size:24px">&#x1f916;</div><div class="stat-label">Demo IA</div>
+      </div>
+      <div class="stat-card" onclick="launchDemo(false)" style="cursor:pointer">
+        <div class="stat-value" style="font-size:24px">&#x1f50d;</div><div class="stat-label">Demo Offline</div>
+      </div>
+    </div>
+    <div id="pasteZone" style="display:none;margin-bottom:24px">
+      <div class="panel"><div class="panel-header">Coller le contenu brut d'un email</div><div class="panel-body">
+        <textarea id="welcomePasteArea" rows="8" style="width:100%;background:var(--bg1);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:12px;font-family:monospace;font-size:12px;resize:vertical" placeholder="Collez ici le contenu brut d'un email (headers + body)..."></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-primary" onclick="analyzeWelcomePaste()">Analyser le texte</button>
+          <button class="btn" onclick="document.getElementById('welcomePasteArea').value='';document.getElementById('pasteZone').style.display='none'">Annuler</button>
+        </div>
+      </div></div>
+    </div>
+    <div class="overview-grid" style="grid-template-columns:1fr 1fr;gap:16px">
+      <div class="panel"><div class="panel-header">Statistiques</div><div class="panel-body" id="welcomeStats"></div></div>
+      <div class="panel"><div class="panel-header">Dernieres analyses</div><div class="panel-body" id="welcomeRecent"></div></div>
+    </div>
+  </div>`;
+  renderWelcomeScreen();
 }
 
 // ══════════ FILE INPUTS ══════════
@@ -808,6 +948,13 @@ function renderAlerts() {
 function renderAnalysis(a) {
   const el = document.getElementById('analysisContent');
   el.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-sm btn-primary" onclick="downloadIncidentPDF()">&#x1f4c4; Rapport PDF</button>
+      <button class="btn btn-sm" onclick="downloadIncidentDOCX()">&#x1f4dd; Rapport Word</button>
+      <button class="btn btn-sm" onclick="createTicketFromCurrent()">&#x1f3ab; Creer ticket</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="resetAnalysisView()">&#x2190; Retour</button>
+    </div>
     <div class="overview-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px" id="statsCards"></div>
     <div class="panel full-width" style="margin-bottom:16px" id="killchainSection" class="hidden">
       <div class="panel-header">MITRE ATT&CK Kill Chain</div>
@@ -1882,9 +2029,8 @@ async function syncTicketToRemote(ticket) {
 
 // ══════════ INIT TICKETS + INTEGRATIONS ══════════
 renderTicketBoard();
-checkIntegrationStatus();
+checkIntegrationStatus().then(() => renderWelcomeScreen());
+renderWelcomeScreen();
 </script>
-</body>
-</html>
 </body>
 </html>

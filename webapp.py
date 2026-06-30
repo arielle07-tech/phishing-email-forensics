@@ -68,8 +68,8 @@ def analyze_email():
             ext = os.path.splitext(file.filename)[1].lower()
             if ext not in (".eml", ".txt", ".msg"):
                 return jsonify({"error": f"Format '{ext}' non supporté. Formats acceptés : .eml, .txt, .msg"}), 400
-            # Sauvegarder le fichier temporairement (toujours en .eml pour le parser)
-            with tempfile.NamedTemporaryFile(suffix=".eml", delete=False, dir=REPORTS_DIR) as tmp:
+            # Sauvegarder le fichier temporairement (garder l'extension originale pour la détection)
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False, dir=REPORTS_DIR) as tmp:
                 file.save(tmp)
                 tmp_path = tmp.name
             filename = os.path.splitext(file.filename)[0]

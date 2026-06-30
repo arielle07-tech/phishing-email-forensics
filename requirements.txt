@@ -7,6 +7,9 @@ openai>=1.50.0,<2.0      # OpenAI API (set OPENAI_API_KEY)
 jiter>=0.4.0,<1          # JSON parser (anthropic dependency)
 # Ollama: no pip package needed, uses HTTP API directly
 
+# === Email Parsing ===
+extract-msg>=0.50.0        # Outlook .msg file support
+
 # === Web Dashboard ===
 flask>=3.0
 flask-cors>=4.0

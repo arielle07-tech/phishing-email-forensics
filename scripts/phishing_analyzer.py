@@ -89,6 +89,8 @@ class PhishingAnalyzer:
     def __init__(self, eml_path: str):
         self.eml_path = eml_path
         self.msg = None
+        self._msg_obj = None  # extract-msg object for .msg files
+        self._is_msg = False
         self.report = {
             "metadata": {},
             "headers_analysis": {},
@@ -100,13 +102,81 @@ class PhishingAnalyzer:
         }
 
     def load_email(self) -> bool:
-        """Charge et parse le fichier .eml."""
+        """Charge et parse le fichier .eml ou .msg."""
+        try:
+            # Detect .msg by magic bytes (OLE2 Compound Document)
+            with open(self.eml_path, 'rb') as f:
+                magic = f.read(8)
+
+            if magic[:4] == b'\xd0\xcf\x11\xe0':  # OLE2 magic
+                return self._load_msg()
+            else:
+                return self._load_eml()
+        except Exception as e:
+            print(f"[ERREUR] Impossible de charger {self.eml_path}: {e}")
+            return False
+
+    def _load_eml(self) -> bool:
+        """Parse un fichier .eml standard (RFC 822)."""
         try:
             with open(self.eml_path, 'rb') as f:
                 self.msg = BytesParser(policy=policy.default).parse(f)
+            self._is_msg = False
             return True
         except Exception as e:
-            print(f"[ERREUR] Impossible de charger {self.eml_path}: {e}")
+            print(f"[ERREUR] Échec parsing .eml: {e}")
+            return False
+
+    def _load_msg(self) -> bool:
+        """Parse un fichier .msg (Outlook) via extract-msg, puis convertit en email.Message."""
+        try:
+            import extract_msg
+            msg_obj = extract_msg.Message(self.eml_path)
+            self._msg_obj = msg_obj
+            self._is_msg = True
+
+            # Build a standard email.Message from .msg data for uniform processing
+            from email.message import EmailMessage
+            em = EmailMessage()
+
+            em['Subject'] = msg_obj.subject or ''
+            em['From'] = msg_obj.sender or ''
+            em['To'] = msg_obj.to or ''
+            if msg_obj.cc:
+                em['Cc'] = msg_obj.cc
+            if msg_obj.date:
+                em['Date'] = str(msg_obj.date)
+            if hasattr(msg_obj, 'messageId') and msg_obj.messageId:
+                em['Message-ID'] = msg_obj.messageId
+
+            # Copy all headers from .msg headerDict
+            if msg_obj.headerDict:
+                for key, value in msg_obj.headerDict.items():
+                    if key.lower() not in ('subject', 'from', 'to', 'cc', 'date', 'message-id'):
+                        try:
+                            em[key] = str(value).strip()
+                        except Exception:
+                            pass
+
+            # Set body
+            body = msg_obj.body or ''
+            html_body = msg_obj.htmlBody
+            if html_body:
+                if isinstance(html_body, bytes):
+                    html_body = html_body.decode('utf-8', errors='replace')
+                em.set_content(body)
+                em.add_alternative(html_body, subtype='html')
+            else:
+                em.set_content(body)
+
+            self.msg = em
+            print(f"[MSG] Fichier .msg parsé: {msg_obj.subject}")
+            return True
+        except ImportError:
+            print("[ERREUR] Module extract-msg non installé. Installez avec: pip install extract-msg")
+            return False
+        except Exception as e:
+            print(f"[ERREUR] Échec parsing .msg: {e}")
             return False
 
     def analyze(self, enable_ai=False) -> dict:
@@ -351,10 +421,27 @@ class PhishingAnalyzer:
     # ── Pièces jointes ──
 
     def _analyze_attachments(self):
-        """Analyse les pièces jointes."""
+        """Analyse les pièces jointes (.eml et .msg)."""
         attachments = []
 
-        if self.msg.is_multipart():
+        # .msg files: use extract-msg attachment objects directly
+        if self._is_msg and self._msg_obj:
+            for att_obj in self._msg_obj.attachments:
+                filename = att_obj.longFilename or att_obj.shortFilename or "unnamed"
+                data = att_obj.data or b''
+                if data:
+                    import mimetypes
+                    content_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+                    att = {
+                        "filename": filename,
+                        "content_type": content_type,
+                        "size_bytes": len(data),
+                        "md5": hashlib.md5(data).hexdigest(),
+                        "sha256": hashlib.sha256(data).hexdigest(),
+                        "suspicious_extension": self._is_suspicious_extension(filename)
+                    }
+                    attachments.append(att)
+        elif self.msg.is_multipart():
             for part in self.msg.walk():
                 content_disposition = str(part.get("Content-Disposition", ""))
                 if "attachment" in content_disposition or part.get_filename():
