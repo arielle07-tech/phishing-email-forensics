@@ -162,15 +162,17 @@ _last_analysis = {}
 def generate_pdf():
     """Génère un rapport d'incident SOC en PDF."""
     try:
-        from scripts.report_generator import generate_pdf_report
+        from scripts.report_generator import generate_pdf_report, _generate_report_number
         data = request.get_json(silent=True)
         if not data:
             return jsonify({"error": "Données d'analyse manquantes."}), 400
         pdf_bytes = generate_pdf_report(data)
+        report_num = _generate_report_number(data)
+        filename = f"{report_num}_Phishing_Incident.pdf"
         return Response(
             pdf_bytes,
             mimetype="application/pdf",
-            headers={"Content-Disposition": "attachment; filename=Rapport_Incident_Phishing.pdf"}
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
     except Exception as e:
         traceback.print_exc()
@@ -181,15 +183,17 @@ def generate_pdf():
 def generate_docx():
     """Génère un rapport d'incident SOC en DOCX."""
     try:
-        from scripts.report_generator import generate_docx_report
+        from scripts.report_generator import generate_docx_report, _generate_report_number
         data = request.get_json(silent=True)
         if not data:
             return jsonify({"error": "Données d'analyse manquantes."}), 400
         docx_bytes = generate_docx_report(data)
+        report_num = _generate_report_number(data)
+        filename = f"{report_num}_Phishing_Incident.docx"
         return Response(
             docx_bytes,
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": "attachment; filename=Rapport_Incident_Phishing.docx"}
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
     except Exception as e:
         traceback.print_exc()

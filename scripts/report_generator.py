@@ -383,13 +383,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
     ]
     story.append(_pdf_info_table(alert_data, PRIMARY))
 
-    # Timeline
-    story.append(Spacer(1, 2*mm))
-    story.append(Paragraph("<b>Chronologie</b>", styles['SubSection']))
-    tl_data = [["PHASE", "HORODATAGE", "DESCRIPTION"]]
-    for phase, ts, desc in timeline:
-        tl_data.append([phase, _safe(ts)[:30], desc])
-    story.append(_pdf_styled_table(tl_data, [32*mm, 42*mm, 100*mm], PRIMARY))
+    story.append(Spacer(1, 6*mm))
 
     # ════════════════════════════════════════
     # 3. TRIAGE DECISION
@@ -471,7 +465,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════
     # 4. ENRICHMENT FINDINGS
     # ════════════════════════════════════════
-    story.append(PageBreak())
+    story.append(Spacer(1, 6*mm))
     sec += 1
     story.append(_pdf_section_header(str(sec), "ENRICHMENT FINDINGS", PRIMARY))
 
@@ -509,7 +503,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # 4.1 URLs
     urls = iocs.get("urls", [])
     if urls:
-        story.append(Paragraph("<b>4.1 URLs detectees</b>", styles['SubSection']))
+        story.append(Paragraph("<b>URLs detectees</b>", styles['SubSection']))
         url_data = [["URL (DEFANGED)", "DOMAINE", "FLAGS"]]
         for u in urls[:15]:
             flags = []
@@ -527,7 +521,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # 4.2 IPs with threat intel
     ips = iocs.get("ips", [])
     if ips:
-        story.append(Paragraph("<b>4.2 Adresses IP</b>", styles['SubSection']))
+        story.append(Paragraph("<b>Adresses IP</b>", styles['SubSection']))
         ip_data = [["IP (DEFANGED)", "TYPE", "THREAT INTEL"]]
         for ip_info in ips[:10]:
             priv = "Privee" if ip_info.get('is_private') else "Publique"
@@ -539,7 +533,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # 4.3 Received chain (hop analysis)
     received_chain = headers_a.get("received_chain", [])
     if received_chain:
-        story.append(Paragraph("<b>4.3 Chaine de transmission (Received hops)</b>", styles['SubSection']))
+        story.append(Paragraph("<b>Chaine de transmission (Received hops)</b>", styles['SubSection']))
         story.append(Paragraph(
             f"L'email a traverse <b>{len(received_chain)}</b> serveur(s).",
             styles['Body']))
@@ -554,12 +548,12 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # 4.4 Phishing keywords
     kws = iocs.get("phishing_keywords", [])
     if kws:
-        story.append(Paragraph("<b>4.4 Mots-cles phishing</b>", styles['SubSection']))
+        story.append(Paragraph("<b>Mots-cles phishing</b>", styles['SubSection']))
         story.append(Paragraph(", ".join(kws), styles['Body']))
 
     # 4.5 Attachments (full hashes)
     if atts:
-        story.append(Paragraph("<b>4.5 Pieces jointes</b>", styles['SubSection']))
+        story.append(Paragraph("<b>Pieces jointes</b>", styles['SubSection']))
         for att in atts:
             sus_label = "SUSPECT" if att.get("suspicious_extension") else "Normal"
             sus_color = DANGER if att.get("suspicious_extension") else SUCCESS
@@ -655,26 +649,12 @@ def generate_pdf_report(analysis: dict) -> bytes:
             "Classer comme faux positif si confirme apres verification manuelle",
         ]
 
-    # Use AI recs if available, otherwise use baseline
+    # Use AI recs if available, otherwise use baseline only (no verdict recs to avoid redundancy)
     final_recs = recs if recs else baseline_recs
-    if rec_from_verdict and not recs:
-        for line in rec_from_verdict.split("\n"):
-            cleaned = _clean_recommendation(line)
-            if cleaned and cleaned not in final_recs:
-                final_recs.append(cleaned)
-
-    # Deduplicate and clean all recommendations
-    seen = set()
-    deduped_recs = []
-    for r in final_recs:
-        cleaned = _clean_recommendation(r)
-        if cleaned and cleaned.lower() not in seen:
-            seen.add(cleaned.lower())
-            deduped_recs.append(cleaned)
 
     rec_data = [["#", "ACTION", "OWNER"]]
     owners = ["SOC L1", "SOC L2", "SOC L2", "RSSI", "SOC L1"]
-    for i, r in enumerate(deduped_recs[:8]):
+    for i, r in enumerate(final_recs[:6]):
         owner = owners[i] if i < len(owners) else "SOC"
         rec_data.append([str(i + 1), _safe(r), owner])
     story.append(_pdf_styled_table(rec_data, [10*mm, 134*mm, 30*mm], PRIMARY))
@@ -988,19 +968,6 @@ def generate_docx_report(analysis: dict) -> bytes:
         ("Score", f"{score}/100 ({level})"),
     ])
 
-    # Timeline
-    doc.add_paragraph()
-    h = doc.add_paragraph()
-    run = h.add_run("Chronologie")
-    run.bold = True
-    run.font.size = Pt(10)
-    run.font.color.rgb = PRIMARY
-
-    tl_rows = [["Phase", "Horodatage", "Description"]]
-    for phase, ts, desc in timeline:
-        tl_rows.append([phase, str(ts)[:30], desc])
-    _grid_table(tl_rows)
-
     # ════════════════════════════════════════
     # 3. TRIAGE DECISION
     # ════════════════════════════════════════
@@ -1083,7 +1050,7 @@ def generate_docx_report(analysis: dict) -> bytes:
 
     urls = iocs.get("urls", [])
     if urls:
-        doc.add_heading("4.1 URLs detectees", level=2)
+        doc.add_heading("URLs detectees", level=2)
         url_rows = [["URL (defanged)", "Flags"]]
         for u in urls[:15]:
             flags = []
@@ -1096,7 +1063,7 @@ def generate_docx_report(analysis: dict) -> bytes:
 
     ips_list = iocs.get("ips", [])
     if ips_list:
-        doc.add_heading("4.2 Adresses IP", level=2)
+        doc.add_heading("Adresses IP", level=2)
         ip_rows = [["IP (defanged)", "Type", "Threat Intel"]]
         for ip_info in ips_list[:10]:
             ip_rows.append([
@@ -1108,7 +1075,7 @@ def generate_docx_report(analysis: dict) -> bytes:
 
     received_chain = headers_a.get("received_chain", [])
     if received_chain:
-        doc.add_heading("4.3 Chaine de transmission", level=2)
+        doc.add_heading("Chaine de transmission", level=2)
         _note(f"L'email a traverse {len(received_chain)} serveur(s).", italic=False, size=9, color=TEXT_DARK)
         hop_rows = [["Hop", "IP(s)", "Details"]]
         for hop in received_chain:
@@ -1118,11 +1085,11 @@ def generate_docx_report(analysis: dict) -> bytes:
 
     kws = iocs.get("phishing_keywords", [])
     if kws:
-        doc.add_heading("4.4 Mots-cles phishing", level=2)
+        doc.add_heading("Mots-cles phishing", level=2)
         doc.add_paragraph(", ".join(kws))
 
     if atts:
-        doc.add_heading("4.5 Pieces jointes", level=2)
+        doc.add_heading("Pieces jointes", level=2)
         for att in atts:
             _kv_table([
                 ("Fichier", att.get("filename", "")),
@@ -1196,24 +1163,10 @@ def generate_docx_report(analysis: dict) -> bytes:
         ]
 
     final_recs = recs if recs else baseline
-    if rec_from_verdict and not recs:
-        for line in rec_from_verdict.split("\n"):
-            cleaned = _clean_recommendation(line)
-            if cleaned and cleaned not in final_recs:
-                final_recs.append(cleaned)
-
-    # Deduplicate and clean
-    seen = set()
-    deduped = []
-    for r in final_recs:
-        cleaned = _clean_recommendation(r)
-        if cleaned and cleaned.lower() not in seen:
-            seen.add(cleaned.lower())
-            deduped.append(cleaned)
 
     owners = ["SOC L1", "SOC L2", "SOC L2", "RSSI", "SOC L1"]
     rec_rows = [["#", "Action", "Owner"]]
-    for i, r in enumerate(deduped[:8]):
+    for i, r in enumerate(final_recs[:6]):
         owner = owners[i] if i < len(owners) else "SOC"
         rec_rows.append([str(i + 1), r, owner])
     _grid_table(rec_rows)
