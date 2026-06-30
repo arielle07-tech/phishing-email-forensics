@@ -417,8 +417,6 @@
     <span class="status-label" id="statusLabel">Operationnel</span>
     <input type="file" id="fileInput" accept=".json" style="display:none">
     <input type="file" id="emlInput" accept=".eml,.txt,.msg" style="display:none">
-    <button class="btn" onclick="loadDemoFromAPI()">Demo IA</button>
-    <button class="btn" onclick="loadDemoData()">Demo Offline</button>
     <button class="btn" onclick="document.getElementById('fileInput').click()">Importer JSON</button>
     <button class="btn" onclick="window.print()" id="btnExport" style="display:none">Export PDF</button>
     <button class="btn" onclick="downloadJSON()" id="btnJSON" style="display:none">Telecharger JSON</button>
@@ -489,22 +487,38 @@
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-    <div class="upload-area" onclick="document.getElementById('emlInput').click()" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" style="margin:0">
-      <div class="upload-icon">&#x1f4c1;</div>
-      <div class="upload-text">
-        <strong>Importer un fichier</strong><br>
-        Formats : .eml, .txt, .msg, .json
+  <!-- Row 3: IOCs + MITRE -->
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-header">Top IOCs detectes</div>
+      <div class="panel-body" id="topIocsPanel">
+        <div class="empty-state">Aucun IOC</div>
       </div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <textarea id="pasteArea" placeholder="Collez ici le contenu brut d'un email (headers + body)..." style="flex:1;background:var(--bg);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);padding:12px;font-family:'Consolas',monospace;font-size:11px;resize:none"></textarea>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="analyzeText()" style="flex:1">Analyser le texte</button>
-        <button class="btn" onclick="document.getElementById('pasteArea').value=''" style="width:70px">Effacer</button>
+    <div class="panel">
+      <div class="panel-header">Top MITRE ATT&CK</div>
+      <div class="panel-body" id="topMitrePanel">
+        <div class="empty-state">Aucune technique</div>
       </div>
     </div>
   </div>
+
+  <!-- Row 4: Timeline + Tickets -->
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-header">Timeline des analyses (7 derniers jours)</div>
+      <div class="panel-body" id="timelinePanel">
+        <div class="empty-state">Aucune analyse</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">Statut des tickets</div>
+      <div class="panel-body" id="ticketStatusPanel">
+        <div class="empty-state">Aucun ticket</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ══════════ ANALYSIS TAB ══════════ -->
@@ -519,14 +533,6 @@
         <div class="stat-card" onclick="document.getElementById('pasteZone').style.display=document.getElementById('pasteZone').style.display==='none'?'block':'none'" style="cursor:pointer">
           <div class="stat-value" style="font-size:24px">&#x1f4cb;</div>
           <div class="stat-label">Coller texte</div>
-        </div>
-        <div class="stat-card" onclick="launchDemo(true)" style="cursor:pointer">
-          <div class="stat-value" style="font-size:24px">&#x1f916;</div>
-          <div class="stat-label">Demo IA</div>
-        </div>
-        <div class="stat-card" onclick="launchDemo(false)" style="cursor:pointer">
-          <div class="stat-value" style="font-size:24px">&#x1f50d;</div>
-          <div class="stat-label">Demo Offline</div>
         </div>
       </div>
 
@@ -713,7 +719,7 @@ function renderWelcomeScreen() {
     </div>`;
 
   if (total === 0) {
-    recentEl.innerHTML = '<div style="color:var(--text3);text-align:center;padding:20px">Aucune analyse — lancez la demo ou importez un .eml</div>';
+    recentEl.innerHTML = '<div style="color:var(--text3);text-align:center;padding:20px">Aucune analyse — importez un fichier .eml ou .msg pour commencer</div>';
     return;
   }
 
@@ -752,12 +758,6 @@ function resetAnalysisView() {
       </div>
       <div class="stat-card" onclick="document.getElementById('pasteZone').style.display=document.getElementById('pasteZone').style.display==='none'?'block':'none'" style="cursor:pointer">
         <div class="stat-value" style="font-size:24px">&#x1f4cb;</div><div class="stat-label">Coller texte</div>
-      </div>
-      <div class="stat-card" onclick="launchDemo(true)" style="cursor:pointer">
-        <div class="stat-value" style="font-size:24px">&#x1f916;</div><div class="stat-label">Demo IA</div>
-      </div>
-      <div class="stat-card" onclick="launchDemo(false)" style="cursor:pointer">
-        <div class="stat-value" style="font-size:24px">&#x1f50d;</div><div class="stat-label">Demo Offline</div>
       </div>
     </div>
     <div id="pasteZone" style="display:none;margin-bottom:24px">
@@ -898,6 +898,10 @@ function updateOverview() {
 
   renderScoreChart();
   renderAlerts();
+  renderTopIocs();
+  renderTopMitre();
+  renderTimeline();
+  renderTicketStatus();
 }
 
 function renderScoreChart() {
@@ -942,6 +946,186 @@ function renderAlerts() {
       <span class="score-pill ${e.level.toLowerCase()}">${e.score}</span>
     </div>`;
   }).join('');
+}
+
+// ══════════ TOP IOCs ══════════
+function renderTopIocs() {
+  const h = analysisHistory;
+  if (!h.length) { document.getElementById('topIocsPanel').innerHTML = '<div class="empty-state">Aucun IOC</div>'; return; }
+
+  const domainCount = {};
+  const ipCount = {};
+  h.forEach(e => {
+    const a = e.data || {};
+    const iocs = a.iocs || {};
+    (iocs.urls || []).forEach(u => {
+      try {
+        const host = new URL(u.url || u).hostname;
+        domainCount[host] = (domainCount[host] || 0) + 1;
+      } catch(_) {}
+    });
+    (iocs.ip_addresses || []).forEach(ip => {
+      const addr = typeof ip === 'string' ? ip : (ip.ip || ip.address || '');
+      if (addr) ipCount[addr] = (ipCount[addr] || 0) + 1;
+    });
+  });
+
+  const topDomains = Object.entries(domainCount).sort((a,b) => b[1]-a[1]).slice(0, 4);
+  const topIps = Object.entries(ipCount).sort((a,b) => b[1]-a[1]).slice(0, 3);
+
+  if (!topDomains.length && !topIps.length) {
+    document.getElementById('topIocsPanel').innerHTML = '<div class="empty-state">Aucun IOC</div>';
+    return;
+  }
+
+  let html = '';
+  if (topDomains.length) {
+    html += '<div style="margin-bottom:10px;font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Domaines suspects</div>';
+    html += topDomains.map(([d, c]) =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <span style="font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--danger)">${esc(d)}</span>
+        <span style="background:var(--bg1);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">${c}x</span>
+      </div>`).join('');
+  }
+  if (topIps.length) {
+    html += '<div style="margin-top:12px;margin-bottom:10px;font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Adresses IP</div>';
+    html += topIps.map(([ip, c]) =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <span style="font-family:monospace;flex:1;color:var(--warning)">${esc(ip)}</span>
+        <span style="background:var(--bg1);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">${c}x</span>
+      </div>`).join('');
+  }
+  document.getElementById('topIocsPanel').innerHTML = html;
+}
+
+// ══════════ TOP MITRE ATT&CK ══════════
+function renderTopMitre() {
+  const h = analysisHistory;
+  if (!h.length) { document.getElementById('topMitrePanel').innerHTML = '<div class="empty-state">Aucune technique</div>'; return; }
+
+  const techniqueCount = {};
+  const techniqueNames = {};
+  h.forEach(e => {
+    const a = e.data || {};
+    const ai = a.ai_analysis || {};
+    const techniques = ai.mitre_techniques || [];
+    techniques.forEach(t => {
+      const tid = t.id || t.technique_id || '';
+      const name = t.name || t.technique || tid;
+      if (tid) {
+        techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
+        techniqueNames[tid] = name;
+      }
+    });
+    // Also check enrichment mitre
+    const enrich = a.enrichment || {};
+    (enrich.mitre_mapping || []).forEach(t => {
+      const tid = t.technique_id || t.id || '';
+      const name = t.technique_name || t.name || tid;
+      if (tid) {
+        techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
+        if (!techniqueNames[tid]) techniqueNames[tid] = name;
+      }
+    });
+  });
+
+  const top = Object.entries(techniqueCount).sort((a,b) => b[1]-a[1]).slice(0, 5);
+  if (!top.length) { document.getElementById('topMitrePanel').innerHTML = '<div class="empty-state">Aucune technique detectee</div>'; return; }
+
+  const maxCount = top[0][1];
+  document.getElementById('topMitrePanel').innerHTML = top.map(([tid, count]) => {
+    const pct = Math.round((count / maxCount) * 100);
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <span style="font-size:12px"><span style="font-family:monospace;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:3px;font-size:11px;margin-right:6px">${esc(tid)}</span>${esc(techniqueNames[tid] || '')}</span>
+        <span style="font-size:11px;color:var(--text3);font-weight:700">${count}</span>
+      </div>
+      <div style="height:6px;background:var(--bg1);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:var(--accent);border-radius:3px;transition:width 0.3s"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ══════════ TIMELINE DES ANALYSES ══════════
+function renderTimeline() {
+  const h = analysisHistory;
+  if (!h.length) { document.getElementById('timelinePanel').innerHTML = '<div class="empty-state">Aucune analyse</div>'; return; }
+
+  // Last 7 days
+  const now = new Date();
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    days.push({ date: d, label: d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }), analyses: [] });
+  }
+
+  h.forEach(e => {
+    const ed = new Date(e.date);
+    days.forEach(day => {
+      if (ed.toDateString() === day.date.toDateString()) {
+        day.analyses.push(e);
+      }
+    });
+  });
+
+  const maxPerDay = Math.max(...days.map(d => d.analyses.length), 1);
+
+  document.getElementById('timelinePanel').innerHTML =
+    '<div style="display:flex;align-items:flex-end;gap:6px;height:110px;padding-top:10px">' +
+    days.map(day => {
+      const count = day.analyses.length;
+      const height = count > 0 ? Math.max((count / maxPerDay) * 80, 12) : 4;
+      const hasHighRisk = day.analyses.some(a => a.level === 'CRITICAL' || a.level === 'HIGH');
+      const color = count === 0 ? 'var(--border2)' : hasHighRisk ? 'var(--danger)' : 'var(--success)';
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+        <div style="font-size:10px;font-weight:700;color:var(--text2)">${count || ''}</div>
+        <div style="width:100%;height:${height}px;background:${color};border-radius:4px 4px 0 0;transition:height 0.3s" title="${count} analyse(s)"></div>
+        <div style="font-size:10px;color:var(--text3);white-space:nowrap">${day.label}</div>
+      </div>`;
+    }).join('') + '</div>';
+}
+
+// ══════════ STATUT DES TICKETS ══════════
+function renderTicketStatus() {
+  const tickets = JSON.parse(localStorage.getItem('phishing_tickets') || '[]');
+  if (!tickets.length) { document.getElementById('ticketStatusPanel').innerHTML = '<div class="empty-state">Aucun ticket</div>'; return; }
+
+  const open = tickets.filter(t => t.status === 'open' || t.status === 'nouveau' || t.status === 'new').length;
+  const inProgress = tickets.filter(t => t.status === 'in_progress' || t.status === 'en_cours').length;
+  const closed = tickets.filter(t => t.status === 'closed' || t.status === 'resolved' || t.status === 'ferme').length;
+  const total = tickets.length;
+
+  const openPct = total ? Math.round((open / total) * 100) : 0;
+  const ipPct = total ? Math.round((inProgress / total) * 100) : 0;
+  const closedPct = total ? Math.round((closed / total) * 100) : 0;
+
+  document.getElementById('ticketStatusPanel').innerHTML = `
+    <div style="display:flex;justify-content:center;gap:24px;margin-bottom:16px">
+      <div style="text-align:center">
+        <div style="font-size:28px;font-weight:700;color:var(--warning)">${open}</div>
+        <div style="font-size:11px;color:var(--text3)">Ouverts</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:28px;font-weight:700;color:var(--info)">${inProgress}</div>
+        <div style="font-size:11px;color:var(--text3)">En cours</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:28px;font-weight:700;color:var(--success)">${closed}</div>
+        <div style="font-size:11px;color:var(--text3)">Fermes</div>
+      </div>
+    </div>
+    <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--bg1)">
+      <div style="width:${openPct}%;background:var(--warning);transition:width 0.3s"></div>
+      <div style="width:${ipPct}%;background:var(--info);transition:width 0.3s"></div>
+      <div style="width:${closedPct}%;background:var(--success);transition:width 0.3s"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--text3)">
+      <span>${total} ticket(s) au total</span>
+      <span style="cursor:pointer;color:var(--accent)" onclick="switchTab('tickets')">Voir tous &#x2192;</span>
+    </div>
+  `;
 }
 
 // ══════════ ANALYSIS RENDERING ══════════
