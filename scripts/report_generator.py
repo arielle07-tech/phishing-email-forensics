@@ -281,7 +281,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
     styles.add(ParagraphStyle('SubHeading', parent=styles['Normal'],
         fontSize=11, textColor=STEEL, spaceBefore=14, spaceAfter=6,
         fontName='Helvetica-Bold', leading=14))
-    styles.add(ParagraphStyle('Bullet', parent=styles['Normal'],
+    styles.add(ParagraphStyle('BulletItem', parent=styles['Normal'],
         fontSize=10, leading=15, textColor=TEXT_BODY, leftIndent=12,
         spaceBefore=2, spaceAfter=2))
     styles.add(ParagraphStyle('Mono', parent=styles['Normal'],
@@ -503,7 +503,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
     if factors:
         story.append(Paragraph("Facteurs de risque", styles['SubHeading']))
         for f_item in factors:
-            story.append(Paragraph(f'&bull;  {_safe(f_item)}', styles['Bullet']))
+            story.append(Paragraph(f'&bull;  {_safe(f_item)}', styles['BulletItem']))
         story.append(Spacer(1, 8*mm))
 
     # Authentication
@@ -531,7 +531,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
         story.append(Spacer(1, 8*mm))
         story.append(Paragraph("Anomalies detectees", styles['SubHeading']))
         for a in anomalies:
-            story.append(Paragraph(f'&bull;  {_safe(a)}', styles['Bullet']))
+            story.append(Paragraph(f'&bull;  {_safe(a)}', styles['BulletItem']))
 
     story.append(PageBreak())
 
@@ -1460,14 +1460,30 @@ def _pdf_styled_table(data, col_widths, header_color):
 
 def _pdf_styled_table_v2(data, col_widths, header_color):
     from reportlab.lib.colors import HexColor
-    from reportlab.platypus import Table, TableStyle
+    from reportlab.platypus import Table, TableStyle, Paragraph
+    from reportlab.lib.styles import ParagraphStyle
 
-    t = Table(data, colWidths=col_widths)
+    # Wrap all string cells into Paragraph objects so text wraps properly
+    cell_style = ParagraphStyle('tcell', fontSize=9, leading=12,
+                                 textColor=HexColor('#2d3748'))
+    header_style = ParagraphStyle('thcell', fontSize=9, leading=12,
+                                   textColor=HexColor('#ffffff'),
+                                   fontName='Helvetica-Bold')
+    wrapped = []
+    for i, row in enumerate(data):
+        new_row = []
+        for cell in row:
+            if isinstance(cell, str):
+                style = header_style if i == 0 else cell_style
+                # Data is already escaped by callers via _safe(), so pass as-is
+                new_row.append(Paragraph(cell, style))
+            else:
+                new_row.append(cell)
+        wrapped.append(new_row)
+
+    t = Table(wrapped, colWidths=col_widths)
     t.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('BACKGROUND', (0, 0), (-1, 0), header_color),
-        ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#ffffff')),
         ('GRID', (0, 0), (-1, -1), 0.4, HexColor('#dce1e8')),
         ('TOPPADDING', (0, 0), (-1, -1), 7),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
@@ -1487,16 +1503,27 @@ def _pdf_info_table(data, label_color):
 def _pdf_info_table_v2(data, label_color, content_w):
     from reportlab.lib.units import mm
     from reportlab.lib.colors import HexColor
-    from reportlab.platypus import Table, TableStyle
+    from reportlab.platypus import Table, TableStyle, Paragraph
+    from reportlab.lib.styles import ParagraphStyle
 
     label_w = 46*mm
     value_w = content_w - label_w
-    t = Table(data, colWidths=[label_w, value_w])
+
+    label_style = ParagraphStyle('kv_label', fontSize=10, leading=13,
+                                  fontName='Helvetica-Bold', textColor=label_color)
+    value_style = ParagraphStyle('kv_value', fontSize=10, leading=13,
+                                  textColor=HexColor('#2d3748'))
+
+    wrapped = []
+    for label, val in data:
+        # Data is already escaped by callers via _safe(), so pass as-is
+        wrapped.append([
+            Paragraph(str(label), label_style),
+            Paragraph(str(val or ''), value_style)
+        ])
+
+    t = Table(wrapped, colWidths=[label_w, value_w])
     t.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('TEXTCOLOR', (0, 0), (0, -1), label_color),
-        ('TEXTCOLOR', (1, 0), (1, -1), HexColor('#2d3748')),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('GRID', (0, 0), (-1, -1), 0.4, HexColor('#dce1e8')),
         ('BACKGROUND', (0, 0), (0, -1), HexColor('#f4f6f9')),
