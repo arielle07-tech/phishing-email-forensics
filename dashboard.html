@@ -1945,8 +1945,10 @@ async function reportFromHistory(id, format) {
 }
 
 function clearHistory() {
-  if (!confirm('Vider tout l\'historique ?')) return;
+  if (!confirm('Vider tout l\'historique et les statistiques ?')) return;
+  localStorage.clear();
   analysisHistory = []; saveHistory(); updateOverview(); renderHistoryTable();
+  location.reload();
 }
 
 // ══════════ CSV EXPORT ══════════
