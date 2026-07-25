@@ -1133,7 +1133,7 @@ function renderAnalysis(a) {
       <span style="flex:1"></span>
       <button class="btn btn-sm" onclick="resetAnalysisView()">&#x2190; Retour</button>
     </div>
-    <div class="overview-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px" id="statsCards"></div>
+    <div class="overview-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:16px" id="statsCards"></div>
     <div class="panel full-width" style="margin-bottom:16px" id="killchainSection" class="hidden">
       <div class="panel-header">MITRE ATT&CK Kill Chain</div>
       <div class="panel-body" id="killchainPanel"></div>
@@ -1145,6 +1145,8 @@ function renderAnalysis(a) {
       <div class="panel"><div class="panel-header">Facteurs de Risque</div><div class="panel-body" id="factorsPanel"></div></div>
       <div class="panel"><div class="panel-header">Informations Email</div><div class="panel-body" id="headersPanel"></div></div>
       <div class="panel"><div class="panel-header">Pieces Jointes</div><div class="panel-body" id="attachmentsPanel"></div></div>
+      <div class="panel full-width" id="threatSection"><div class="panel-header">&#x1f6a8; Analyse des Menaces — Pieces Jointes</div><div class="panel-body" id="threatPanel"></div></div>
+      <div class="panel full-width" id="ipSection"><div class="panel-header">&#x1f310; Analyse des IPs</div><div class="panel-body" id="ipPanel"></div></div>
       <div class="panel full-width"><div class="panel-header">Anomalies</div><div class="panel-body" id="anomaliesPanel"></div></div>
       <div class="panel full-width hidden" id="aiSection"><div class="panel-header">Analyse IA — Social Engineering <span class="ai-tag">AI</span></div><div class="panel-body" id="aiPanel"></div></div>
       <div class="panel hidden" id="aiRadarSection"><div class="panel-header">Radar Tactiques <span class="ai-tag">AI</span></div><div class="panel-body" id="aiRadarPanel"></div></div>
@@ -1163,6 +1165,8 @@ function renderAnalysis(a) {
   renderFactors(a);
   renderHeaders(a);
   renderAttachments(a);
+  renderThreatAnalysis(a);
+  renderIPAnalysis(a);
   renderAnomalies(a);
 
   if (a.ai_analysis && !a.ai_analysis.error) {
@@ -1186,8 +1190,9 @@ function renderStats(a) {
     <div class="metric-card"><div class="metric-indicator" style="background:${scoreColor}"></div><div class="metric-value" style="color:${scoreColor}">${score}/100</div><div class="metric-label">Score</div></div>
     <div class="metric-card"><div class="metric-indicator" style="background:var(--accent)"></div><div class="metric-value" style="color:var(--accent)">${iocs.urls_count||0}</div><div class="metric-label">URLs</div></div>
     <div class="metric-card"><div class="metric-indicator" style="background:var(--danger)"></div><div class="metric-value" style="color:${(iocs.suspicious_urls_count||0)>0?'var(--danger)':'var(--success)'}">${iocs.suspicious_urls_count||0}</div><div class="metric-label">Suspectes</div></div>
-    <div class="metric-card"><div class="metric-indicator" style="background:var(--warning)"></div><div class="metric-value" style="color:var(--warning)">${iocs.keywords_count||0}</div><div class="metric-label">Mots-cles</div></div>
+    <div class="metric-card"><div class="metric-indicator" style="background:var(--warning)"></div><div class="metric-value" style="color:var(--warning)">${iocs.ips_count||0}</div><div class="metric-label">IPs</div></div>
     <div class="metric-card"><div class="metric-indicator" style="background:var(--text3)"></div><div class="metric-value">${(a.attachments||[]).length}</div><div class="metric-label">Pieces jointes</div></div>
+    <div class="metric-card"><div class="metric-indicator" style="background:var(--info)"></div><div class="metric-value" style="color:var(--info)">${iocs.keywords_count||0}</div><div class="metric-label">Mots-cles</div></div>
   `;
 }
 
@@ -1218,6 +1223,7 @@ function renderIOCs(a) {
   const iocs = a.iocs||{}; let html = '';
   const urls = iocs.urls||[];
   if (urls.length) {
+    html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:600">URLs detectees (' + urls.length + ')</div>';
     html += '<div class="ioc-list">';
     urls.forEach(u => {
       const flags = [];
@@ -1225,8 +1231,28 @@ function renderIOCs(a) {
       if (u.ip_based) flags.push('IP directe');
       if (u.url_shortener) flags.push('Shortener');
       if (u.mismatched_display) flags.push('Lien trompeur');
-      html += `<div class="ioc-item"><span class="ioc-type">URL</span><span class="ioc-value">${esc(u.url)}</span>${flags.length?`<span class="ioc-flag">${flags.join(' | ')}</span>`:''}></div>`;
+      if (u.source === 'attachment') flags.push('Piece jointe');
+      html += `<div class="ioc-item"><span class="ioc-type">${u.source==='attachment'?'PJ':'URL'}</span><span class="ioc-value">${esc(u.url)}</span>${flags.length?`<span class="ioc-flag">${flags.join(' | ')}</span>`:''}></div>`;
     });
+    html += '</div>';
+  }
+  // IPs summary
+  const ips = iocs.ip_addresses||iocs.ips||[];
+  if (ips.length) {
+    html += '<div style="margin-top:12px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:600">Adresses IP (' + ips.length + ')</div>';
+    ips.forEach(ip => {
+      const srcLabel = ip.source==='header'?'Header':ip.source==='attachment'?'PJ':'Body';
+      const color = ip.is_private?'var(--text3)':'var(--warning)';
+      html += `<div class="ioc-item"><span class="ioc-type" style="background:${color};color:#fff">${srcLabel}</span><span class="ioc-value">${esc(ip.ip)}</span>${ip.is_private?'<span class="ioc-flag">Privee</span>':''}</div>`;
+    });
+    html += '</div>';
+  }
+  // Domains
+  const domains = iocs.domains||[];
+  if (domains.length) {
+    html += '<div style="margin-top:12px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:600">Domaines (' + domains.length + ')</div>';
+    domains.slice(0,15).forEach(d => { html += `<span class="keyword-tag" style="background:var(--accent-dim);color:var(--accent)">${esc(d)}</span>`; });
+    if (domains.length > 15) html += `<span style="color:var(--text3);font-size:11px"> +${domains.length-15} autres</span>`;
     html += '</div>';
   }
   const kws = iocs.phishing_keywords||[];
@@ -1254,20 +1280,232 @@ function renderHeaders(a) {
 function renderAttachments(a) {
   const atts = a.attachments||[];
   if (!atts.length) { document.getElementById('attachmentsPanel').innerHTML = '<div class="empty-state">Aucune piece jointe</div>'; return; }
-  document.getElementById('attachmentsPanel').innerHTML = atts.map(att => `
-    <div class="att-card">
+  document.getElementById('attachmentsPanel').innerHTML = atts.map(att => {
+    let extra = '';
+    if (att.suspicious_extension) {
+      const ext = (att.filename||'').split('.').pop().toLowerCase();
+      if (['html','htm','svg'].includes(ext)) {
+        extra = '<div style="margin-top:6px;padding:6px 8px;background:var(--danger-dim);border-radius:4px;font-size:11px;color:var(--danger)">Extension HTML/SVG — vecteur de credential harvesting courant</div>';
+      } else {
+        extra = '<div style="margin-top:6px;padding:6px 8px;background:var(--warning-dim);border-radius:4px;font-size:11px;color:var(--warning)">Extension suspecte — verifier le contenu</div>';
+      }
+    }
+    return `<div class="att-card">
       <div class="att-name">${esc(att.filename)} ${att.suspicious_extension?'<span class="suspicious">SUSPECT</span>':''}</div>
       <div class="att-meta">Type: ${esc(att.content_type)} | ${formatBytes(att.size_bytes)}</div>
       <div class="att-hash">MD5: ${att.md5}</div>
       <div class="att-hash">SHA256: ${att.sha256}</div>
-    </div>
-  `).join('');
+      ${extra}
+    </div>`;
+  }).join('');
 }
 
 function renderAnomalies(a) {
   const anomalies = (a.headers_analysis||{}).anomalies||[];
   if (!anomalies.length) { document.getElementById('anomaliesPanel').innerHTML = '<div class="empty-state">Aucune anomalie</div>'; return; }
   document.getElementById('anomaliesPanel').innerHTML = anomalies.map(an => `<div class="anomaly">${esc(an)}</div>`).join('');
+}
+
+function renderThreatAnalysis(a) {
+  const iocs = a.iocs||{};
+  const ha = iocs.html_attachment_analysis;
+  const el = document.getElementById('threatSection');
+  if (!ha) { el.style.display='none'; return; }
+  el.style.display='';
+
+  const threatColors = {
+    credential_harvesting: 'var(--danger)',
+    redirect_phishing: 'var(--warning)',
+    obfuscated_payload: 'var(--danger)',
+    data_collection: 'var(--warning)',
+    iframe_injection: 'var(--warning)',
+    suspicious_html: 'var(--info)'
+  };
+  const threatLabels = {
+    credential_harvesting: 'CREDENTIAL HARVESTING',
+    redirect_phishing: 'REDIRECTION MALVEILLANTE',
+    obfuscated_payload: 'PAYLOAD OBFUSQUE',
+    data_collection: 'COLLECTE DE DONNEES',
+    iframe_injection: 'INJECTION IFRAME',
+    suspicious_html: 'HTML SUSPECT'
+  };
+  const color = threatColors[ha.threat_type]||'var(--info)';
+  const label = threatLabels[ha.threat_type]||ha.threat_type;
+
+  let html = `<div style="padding:12px;background:${color}11;border:1px solid ${color}33;border-radius:6px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="background:${color};color:#fff;padding:3px 10px;border-radius:3px;font-size:11px;font-weight:700;letter-spacing:.5px">${label}</span>
+    </div>
+    <div style="color:var(--text);font-size:12px;line-height:1.6">${esc(ha.threat_description)}</div>
+  </div>`;
+
+  // Detail cards
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">';
+
+  if (ha.has_forms) {
+    html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--danger)">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Formulaires</div>
+      <div style="font-size:12px;color:var(--text)">${ha.has_password_field?'Champ mot de passe detecte':'Formulaire de saisie'}</div>
+      ${(ha.form_targets||[]).length?'<div style="font-size:11px;color:var(--warning);margin-top:4px">Cible: '+ha.form_targets.map(t=>esc(t)).join(', ')+'</div>':''}
+    </div>`;
+  }
+
+  if (ha.has_scripts) {
+    html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--warning)">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Scripts detectes</div>
+      <div style="font-size:11px;color:var(--text)">${(ha.script_techniques||[]).map(t=>esc(t)).join('<br>')}</div>
+    </div>`;
+  }
+
+  if (ha.has_obfuscation) {
+    html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--danger)">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Obfuscation</div>
+      <div style="font-size:11px;color:var(--text)">${(ha.obfuscation_methods||[]).map(m=>esc(m)).join('<br>')}</div>
+    </div>`;
+  }
+
+  if (ha.has_redirects) {
+    html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--warning)">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Redirections</div>
+      <div style="font-size:11px;color:var(--text)">${(ha.redirect_targets||[]).map(t=>esc(t)).join('<br>')}</div>
+    </div>`;
+  }
+
+  if (ha.has_iframes) {
+    html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--info)">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Iframes</div>
+      <div style="font-size:11px;color:var(--text)">${(ha.iframe_sources||[]).map(s=>esc(s)).join('<br>')||'Source masquee'}</div>
+    </div>`;
+  }
+
+  if (ha.has_data_exfil) {
+    html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--danger)">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Exfiltration</div>
+      <div style="font-size:11px;color:var(--danger)">Mecanismes d'exfiltration detectes</div>
+    </div>`;
+  }
+
+  html += '</div>';
+
+  // External resources
+  if ((ha.external_resources||[]).length) {
+    html += '<div style="margin-top:12px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:6px">Ressources externes chargees</div>';
+    ha.external_resources.forEach(r => { html += `<div style="font-size:11px;color:var(--text2);padding:2px 0;word-break:break-all">${esc(r)}</div>`; });
+    html += '</div>';
+  }
+
+  document.getElementById('threatPanel').innerHTML = html;
+}
+
+function renderIPAnalysis(a) {
+  const iocs = a.iocs||{};
+  const enriched = iocs.ip_enrichment||[];
+  const el = document.getElementById('ipSection');
+  if (!enriched.length) { el.style.display='none'; return; }
+  el.style.display='';
+
+  // APIs status bar
+  const apis = iocs.threat_intel_apis||{};
+  let apiBar = '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">';
+  Object.entries(apis).forEach(([name, info]) => {
+    const color = info.available ? 'var(--success)' : 'var(--text3)';
+    const icon = info.available ? '&#x2713;' : '&#x2717;';
+    apiBar += `<span style="font-size:10px;padding:3px 8px;background:var(--bg3);border-radius:3px;color:${color}">${icon} ${name.toUpperCase()} ${info.needs_key && !info.available ? '(cle requise)' : ''}</span>`;
+  });
+  apiBar += '</div>';
+
+  let html = apiBar;
+  html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+  html += '<tr style="border-bottom:1px solid var(--border2)">';
+  html += '<th style="text-align:left;padding:6px 8px;color:var(--text3);font-size:10px;text-transform:uppercase">IP</th>';
+  html += '<th style="text-align:left;padding:6px 8px;color:var(--text3);font-size:10px;text-transform:uppercase">Source</th>';
+  html += '<th style="text-align:left;padding:6px 8px;color:var(--text3);font-size:10px;text-transform:uppercase">Geoloc</th>';
+  html += '<th style="text-align:left;padding:6px 8px;color:var(--text3);font-size:10px;text-transform:uppercase">rDNS / ISP</th>';
+  html += '<th style="text-align:left;padding:6px 8px;color:var(--text3);font-size:10px;text-transform:uppercase">Reputation</th>';
+  html += '<th style="text-align:left;padding:6px 8px;color:var(--text3);font-size:10px;text-transform:uppercase">Indicateurs</th>';
+  html += '</tr>';
+
+  enriched.forEach(ip => {
+    const srcLabel = ip.source==='header'?'Header':ip.source==='attachment'?'PJ':'Body';
+    const geo = ip.geo||{};
+    const abuse = ip.abuse||{};
+    const vt = ip.vt||{};
+
+    // Geoloc cell
+    const geoStr = geo.country ? `${geo.city?geo.city+', ':''}${geo.country}` : (ip.classification==='private'?'LAN':'—');
+    const flag = geo.country_code ? `<img src="https://flagcdn.com/16x12/${geo.country_code.toLowerCase()}.png" style="vertical-align:middle;margin-right:4px" onerror="this.style.display='none'">` : '';
+
+    // rDNS / ISP cell
+    let rdnsStr = esc(ip.reverse_dns||'—');
+    if (geo.org) rdnsStr += `<br><span style="color:var(--text3);font-size:10px">${esc(geo.org)}</span>`;
+    if (geo.asn) rdnsStr += ` <span style="color:var(--text3);font-size:10px">(${esc(geo.asn)})</span>`;
+
+    // Reputation cell
+    let repHtml = '';
+    if (abuse.abuse_score !== undefined) {
+      const aColor = abuse.abuse_score >= 75 ? 'var(--danger)' : abuse.abuse_score >= 25 ? 'var(--warning)' : 'var(--success)';
+      repHtml += `<div style="margin-bottom:2px"><span style="font-size:10px;color:var(--text3)">AbuseIPDB:</span> <span style="color:${aColor};font-weight:600">${abuse.abuse_score}%</span> <span style="font-size:10px;color:var(--text3)">(${abuse.total_reports||0} reports)</span></div>`;
+    }
+    if (vt.malicious !== undefined) {
+      const vtColor = vt.malicious > 0 ? 'var(--danger)' : 'var(--success)';
+      repHtml += `<div><span style="font-size:10px;color:var(--text3)">VT:</span> <span style="color:${vtColor};font-weight:600">${vt.malicious}/${(vt.malicious||0)+(vt.harmless||0)+(vt.undetected||0)}</span> <span style="font-size:10px;color:var(--text3)">malicious</span></div>`;
+    }
+    if (!repHtml) {
+      repHtml = ip.provider ? `<span style="color:var(--success);font-size:11px">${esc(ip.provider)}</span>` : '<span style="color:var(--text3)">—</span>';
+    }
+
+    // Risk indicators
+    const riskHtml = (ip.risk_indicators||[]).length
+      ? ip.risk_indicators.map(r => `<span style="display:inline-block;padding:2px 6px;background:var(--danger-dim);color:var(--danger);border-radius:3px;font-size:10px;margin:1px">${esc(r)}</span>`).join('')
+      : '<span style="color:var(--text3);font-size:11px">—</span>';
+
+    html += `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px;font-family:monospace;color:var(--accent)">${esc(ip.ip)}</td>
+      <td style="padding:8px;color:var(--text2)">${srcLabel}</td>
+      <td style="padding:8px;color:var(--text2);font-size:11px">${flag}${esc(geoStr)}</td>
+      <td style="padding:8px;color:var(--text2);font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis">${rdnsStr}</td>
+      <td style="padding:8px">${repHtml}</td>
+      <td style="padding:8px">${riskHtml}</td>
+    </tr>`;
+  });
+  html += '</table>';
+
+  // URL enrichment section
+  const urlEnrich = iocs.url_enrichment||[];
+  if (urlEnrich.length) {
+    html += '<div style="margin-top:16px;border-top:1px solid var(--border2);padding-top:12px">';
+    html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:8px;letter-spacing:.5px">Reputation des URLs suspectes</div>';
+    urlEnrich.forEach(u => {
+      let badges = '';
+      const uh = u.urlhaus||{};
+      const vt = u.vt||{};
+      if (uh.listed) badges += `<span style="padding:2px 8px;background:var(--danger-dim);color:var(--danger);border-radius:3px;font-size:10px;font-weight:600">URLhaus: ${esc(uh.threat||'malicious')}</span> `;
+      if (uh.listed === false) badges += `<span style="padding:2px 8px;background:var(--success-dim);color:var(--success);border-radius:3px;font-size:10px">URLhaus: clean</span> `;
+      if (vt.malicious > 0) badges += `<span style="padding:2px 8px;background:var(--danger-dim);color:var(--danger);border-radius:3px;font-size:10px;font-weight:600">VT: ${vt.malicious} detections</span> `;
+      else if (vt.harmless > 0) badges += `<span style="padding:2px 8px;background:var(--success-dim);color:var(--success);border-radius:3px;font-size:10px">VT: clean</span> `;
+      html += `<div style="padding:6px 0;border-bottom:1px solid var(--border)"><span style="font-family:monospace;font-size:11px;color:var(--text);word-break:break-all">${esc(u.url)}</span><div style="margin-top:4px">${badges||'<span style="color:var(--text3);font-size:10px">Pas de donnees</span>'}</div></div>`;
+    });
+    html += '</div>';
+  }
+
+  // Hash enrichment section
+  const hashEnrich = iocs.hash_enrichment||[];
+  if (hashEnrich.length) {
+    html += '<div style="margin-top:16px;border-top:1px solid var(--border2);padding-top:12px">';
+    html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:8px;letter-spacing:.5px">Reputation des hashes de pieces jointes</div>';
+    hashEnrich.forEach(h => {
+      let badges = '';
+      const vt = h.vt||{};
+      const uh = h.urlhaus||{};
+      if (vt.malicious > 0) badges += `<span style="padding:2px 8px;background:var(--danger-dim);color:var(--danger);border-radius:3px;font-size:10px;font-weight:600">VT: ${vt.malicious} detections${vt.popular_threat_name?' — '+esc(vt.popular_threat_name):''}</span> `;
+      else if (vt.harmless > 0) badges += `<span style="padding:2px 8px;background:var(--success-dim);color:var(--success);border-radius:3px;font-size:10px">VT: clean</span> `;
+      if (uh.listed) badges += `<span style="padding:2px 8px;background:var(--danger-dim);color:var(--danger);border-radius:3px;font-size:10px">URLhaus: ${esc(uh.signature||'listed')}</span> `;
+      html += `<div style="padding:6px 0;border-bottom:1px solid var(--border)"><span style="font-size:11px;color:var(--text)">${esc(h.filename)}</span> <span style="font-family:monospace;font-size:10px;color:var(--text3)">${h.sha256.slice(0,16)}...</span><div style="margin-top:4px">${badges||'<span style="color:var(--text3);font-size:10px">Pas de donnees</span>'}</div></div>`;
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('ipPanel').innerHTML = html;
 }
 
 function renderKillChain(a) {
@@ -1283,10 +1521,15 @@ function renderKillChain(a) {
     {id:'action',name:'Action',techniques:['T1078','T1110']},
   ];
   const mitreIds = mitre.map(m => m.id ? m.id.split('.')[0] : '');
+  const ha = ((a.iocs||{}).html_attachment_analysis)||{};
   document.getElementById('killchainPanel').innerHTML = '<div class="killchain">' +
     phases.map(p => {
       const count = mitreIds.filter(id => p.techniques.some(t => id.startsWith(t))).length;
-      const active = count > 0 || (p.id==='delivery' && (a.iocs||{}).urls_count > 0);
+      let active = count > 0 || (p.id==='delivery' && (a.iocs||{}).urls_count > 0);
+      // Activate phases from HTML analysis
+      if (p.id==='delivery' && (a.attachments||[]).length) active = true;
+      if (p.id==='exploit' && (ha.has_scripts || ha.has_forms)) active = true;
+      if (p.id==='action' && (ha.has_password_field || ha.has_data_exfil)) active = true;
       return `<div class="kc-phase ${active?'active':'inactive'}"><div class="kc-name">${p.name}</div><div class="kc-count" style="color:${active?'var(--danger)':'var(--text3)'}">${active?(count||'!'):'-'}</div></div>`;
     }).join('') + '</div>';
 }

@@ -23,8 +23,8 @@ python-docx>=1.0         # Word (.docx) incident reports
 # Pillow>=10.0
 # opencv-python-headless>=4.8
 
-# v1.3 — Threat Intel enrichment
-# requests>=2.31
+# === Threat Intel Enrichment ===
+requests>=2.31           # HTTP calls for threat intel APIs (ipapi, AbuseIPDB, VT, URLhaus)
 
 # v2.0 — Timeline forensique
 # geoip2>=4.8             # MaxMind GeoIP lookups

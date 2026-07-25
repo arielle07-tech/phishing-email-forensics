@@ -154,9 +154,24 @@ class PhishingAnalyzer:
                 for key, value in msg_obj.headerDict.items():
                     if key.lower() not in ('subject', 'from', 'to', 'cc', 'date', 'message-id'):
                         try:
-                            em[key] = str(value).strip()
+                            # Handle multi-value headers (e.g. Received)
+                            if isinstance(value, list):
+                                for v in value:
+                                    em.append(key, str(v).strip())
+                            else:
+                                em[key] = str(value).strip()
                         except Exception:
                             pass
+
+            # Also try to parse raw headers from .msg header property
+            if hasattr(msg_obj, 'header') and msg_obj.header:
+                raw_header = str(msg_obj.header)
+                import re as _re
+                for m in _re.finditer(r'^(Received:\s*.+?)(?=^[A-Z]|\Z)', raw_header, _re.MULTILINE | _re.DOTALL):
+                    try:
+                        em.append('Received', m.group(1).replace('Received:', '').strip())
+                    except Exception:
+                        pass
 
             # Set body
             body = msg_obj.body or ''
@@ -444,6 +459,137 @@ class PhishingAnalyzer:
         self.report["iocs"]["phishing_keywords"] = keywords_found
         self.report["iocs"]["keywords_count"] = len(keywords_found)
 
+        # HTML attachment deep analysis results
+        html_analysis = att_iocs.get("html_analysis")
+        if html_analysis:
+            self.report["iocs"]["html_attachment_analysis"] = html_analysis
+
+        # Threat Intelligence enrichment (IPs, URLs, hashes)
+        self._enrich_threat_intel(ip_analysis, url_analysis)
+
+    def _enrich_threat_intel(self, ip_list: list, url_list: list):
+        """Enrichit IPs et URLs via APIs Threat Intel + rDNS local."""
+        import socket
+
+        # Import threat_intel module (optional)
+        try:
+            from scripts.threat_intel import enrich_ip, enrich_url, enrich_hash, get_available_apis
+            ti_available = True
+        except ImportError:
+            try:
+                from threat_intel import enrich_ip, enrich_url, enrich_hash, get_available_apis
+                ti_available = True
+            except ImportError:
+                ti_available = False
+
+        # ── IP Enrichment ──
+        enriched_ips = []
+        for ip_entry in ip_list:
+            ip = ip_entry["ip"]
+            enrichment = {
+                "ip": ip,
+                "source": ip_entry.get("source", "unknown"),
+                "is_private": ip_entry.get("is_private", False),
+                "classification": "private" if ip_entry.get("is_private") else "public",
+                "reverse_dns": None,
+                "risk_indicators": [],
+                "geo": {},
+                "abuse": {},
+                "vt": {},
+            }
+
+            if not ip_entry.get("is_private"):
+                # Reverse DNS (always available)
+                try:
+                    hostname = socket.gethostbyaddr(ip)[0]
+                    enrichment["reverse_dns"] = hostname
+                    lower_host = hostname.lower()
+                    if any(kw in lower_host for kw in ['dynamic', 'dhcp', 'pool', 'residential', 'cable', 'dsl']):
+                        enrichment["risk_indicators"].append("IP residentielle/dynamique")
+                    if any(kw in lower_host for kw in ['vps', 'cloud', 'server', 'host', 'dedicated']):
+                        enrichment["risk_indicators"].append("IP hebergeur/VPS")
+                    if not any(kw in lower_host for kw in ['mx', 'mail', 'smtp', 'mta', 'relay', 'postfix', 'sendmail']):
+                        enrichment["risk_indicators"].append("Pas de reference mail dans le rDNS")
+                except Exception:
+                    enrichment["reverse_dns"] = "Non resolvable"
+                    enrichment["risk_indicators"].append("Pas de rDNS")
+
+                # Known providers from rDNS
+                known_providers = {
+                    'google': 'Google/Gmail', 'microsoft': 'Microsoft/O365', 'outlook': 'Microsoft',
+                    'yahoo': 'Yahoo', 'protonmail': 'ProtonMail', 'orange': 'Orange',
+                    'ovh': 'OVH', 'amazon': 'AWS', 'cloudflare': 'Cloudflare'
+                }
+                rdns = (enrichment["reverse_dns"] or "").lower()
+                for key, provider in known_providers.items():
+                    if key in rdns:
+                        enrichment["provider"] = provider
+                        break
+
+                # Threat Intel APIs
+                if ti_available:
+                    ti_data = enrich_ip(ip, is_private=False)
+                    enrichment["geo"] = ti_data.get("geo", {})
+                    enrichment["abuse"] = ti_data.get("abuse", {})
+                    enrichment["vt"] = ti_data.get("vt", {})
+
+                    # Add risk indicators from API data
+                    abuse = enrichment["abuse"]
+                    if abuse.get("abuse_score", 0) >= 50:
+                        enrichment["risk_indicators"].append(
+                            f"AbuseIPDB: score {abuse['abuse_score']}% ({abuse.get('total_reports', 0)} signalements)")
+                    if abuse.get("is_tor"):
+                        enrichment["risk_indicators"].append("Noeud Tor detecte")
+
+                    vt = enrichment["vt"]
+                    if vt.get("malicious", 0) > 0:
+                        enrichment["risk_indicators"].append(
+                            f"VirusTotal: {vt['malicious']} detections malveillantes")
+
+            enriched_ips.append(enrichment)
+
+        self.report["iocs"]["ip_enrichment"] = enriched_ips
+
+        # ── URL Enrichment (suspicious URLs only, to save API quota) ──
+        enriched_urls = []
+        for url_entry in url_list:
+            if url_entry.get("suspicious_tld") or url_entry.get("ip_based") or \
+               url_entry.get("url_shortener") or url_entry.get("mismatched_display"):
+                url_enrich = {"url": url_entry["url"], "urlhaus": {}, "vt": {}}
+                if ti_available:
+                    ti_data = enrich_url(url_entry["url"])
+                    url_enrich["urlhaus"] = ti_data.get("urlhaus", {})
+                    url_enrich["vt"] = ti_data.get("vt", {})
+                enriched_urls.append(url_enrich)
+
+        if enriched_urls:
+            self.report["iocs"]["url_enrichment"] = enriched_urls
+
+        # ── Attachment hash enrichment ──
+        enriched_hashes = []
+        for att in self.report.get("attachments", []):
+            if att.get("suspicious_extension"):
+                hash_enrich = {
+                    "filename": att["filename"],
+                    "sha256": att["sha256"],
+                    "md5": att["md5"],
+                    "vt": {},
+                    "urlhaus": {},
+                }
+                if ti_available:
+                    vt_data = enrich_hash(att["sha256"], "sha256")
+                    hash_enrich["vt"] = vt_data.get("vt", {})
+                    uh_data = enrich_hash(att["md5"], "md5")
+                    hash_enrich["urlhaus"] = uh_data.get("urlhaus", {})
+                enriched_hashes.append(hash_enrich)
+
+        if enriched_hashes:
+            self.report["iocs"]["hash_enrichment"] = enriched_hashes
+
+        # ── APIs status ──
+        if ti_available:
+            self.report["iocs"]["threat_intel_apis"] = get_available_apis()
+
     # ── Pièces jointes ──
 
     def _analyze_attachments(self):
@@ -495,13 +641,15 @@ class PhishingAnalyzer:
         self.report["_attachment_iocs"] = attachment_iocs
 
     def _scan_attachment_content(self, data: bytes, iocs_out: dict):
-        """Scanne le contenu d'une pièce jointe HTML pour extraire URLs, IPs, scripts."""
+        """Analyse approfondie du contenu d'une pièce jointe HTML."""
         try:
             text = data.decode('utf-8', errors='ignore')
         except Exception:
             return
 
-        # Extract URLs from attachment
+        lower_text = text.lower()
+
+        # ── Extract URLs ──
         urls = list(set(URL_PATTERN.findall(text)))
         for url in urls:
             parsed = urlparse(url)
@@ -517,17 +665,161 @@ class PhishingAnalyzer:
                 "source": "attachment"
             })
 
-        # Extract IPs from attachment
+        # ── Extract IPs ──
         ips = list(set(IP_PATTERN.findall(text)))
         for ip in ips:
             iocs_out["ips"].append({"ip": ip, "is_private": self._is_private_ip(ip), "source": "attachment"})
 
-        # Detect obfuscated scripts (common in phishing HTML attachments)
-        script_indicators = ['<script', 'eval(', 'document.write(', 'atob(', 'fromCharCode',
-                             'unescape(', 'String.fromCharCode', 'window.location', 'document.location']
-        lower_text = text.lower()
-        if any(ind.lower() in lower_text for ind in script_indicators):
-            iocs_out["scripts_detected"] = True
+        # ── Deep HTML Analysis ──
+        analysis = {
+            "has_forms": False,
+            "form_targets": [],
+            "has_password_field": False,
+            "has_scripts": False,
+            "script_techniques": [],
+            "has_redirects": False,
+            "redirect_targets": [],
+            "has_iframes": False,
+            "iframe_sources": [],
+            "has_obfuscation": False,
+            "obfuscation_methods": [],
+            "has_data_exfil": False,
+            "external_resources": [],
+            "threat_type": "unknown",
+            "threat_description": ""
+        }
+
+        # Forms — credential harvesting detection
+        form_pattern = re.compile(r'<form[^>]*action=["\']([^"\']*)["\'][^>]*>', re.I)
+        forms = form_pattern.findall(text)
+        if forms or '<form' in lower_text:
+            analysis["has_forms"] = True
+            analysis["form_targets"] = [f for f in forms if f]
+
+        # Password fields — confirms credential harvesting
+        if re.search(r'type=["\']password["\']', lower_text) or 'input.*password' in lower_text:
+            analysis["has_password_field"] = True
+
+        # Email/login fields
+        has_email_field = bool(re.search(r'type=["\']email["\']', lower_text))
+        has_login_keywords = any(kw in lower_text for kw in ['login', 'sign in', 'log in', 'connexion', 'mot de passe', 'identifiant', 'username'])
+
+        # Scripts and obfuscation
+        script_indicators = {
+            'eval(': 'eval() — execution dynamique de code',
+            'document.write(': 'document.write() — injection de contenu',
+            'atob(': 'atob() — decodage Base64',
+            'fromcharcode': 'String.fromCharCode() — construction caractere par caractere',
+            'unescape(': 'unescape() — decodage URL encoding',
+            'window.location': 'window.location — redirection JavaScript',
+            'document.location': 'document.location — redirection JavaScript',
+            'settimeout': 'setTimeout — execution differee',
+            'setinterval': 'setInterval — execution repetee',
+            'xmlhttprequest': 'XMLHttpRequest — requete HTTP sortante',
+            'fetch(': 'fetch() — requete HTTP sortante',
+            '.submit()': '.submit() — soumission automatique de formulaire',
+            'navigator.sendbeacon': 'sendBeacon — exfiltration de donnees',
+            'btoa(': 'btoa() — encodage Base64 sortant'
+        }
+        detected_scripts = []
+        for indicator, desc in script_indicators.items():
+            if indicator in lower_text:
+                detected_scripts.append(desc)
+        if detected_scripts:
+            analysis["has_scripts"] = True
+            analysis["script_techniques"] = detected_scripts
+
+        # Obfuscation detection
+        obf_methods = []
+        if lower_text.count('\\x') > 10:
+            obf_methods.append("Hex encoding (\\\\x)")
+        if lower_text.count('\\u') > 10:
+            obf_methods.append("Unicode encoding (\\\\u)")
+        if 'charcodeat' in lower_text or 'fromcharcode' in lower_text:
+            obf_methods.append("Character code manipulation")
+        if re.search(r'var\s+\w+\s*=\s*\[.*\]\s*;\s*\w+\s*=\s*\w+\.join', lower_text):
+            obf_methods.append("Array join obfuscation")
+        if 'atob(' in lower_text:
+            obf_methods.append("Base64 encoded payload")
+        # Long encoded strings (common in phishing HTML)
+        if re.search(r'[A-Za-z0-9+/=]{200,}', text):
+            obf_methods.append("Long Base64/encoded string detected")
+        if obf_methods:
+            analysis["has_obfuscation"] = True
+            analysis["obfuscation_methods"] = obf_methods
+
+        # Redirects
+        meta_refresh = re.findall(r'<meta[^>]*http-equiv=["\']refresh["\'][^>]*content=["\'][^"\']*url=([^"\';\s]+)', text, re.I)
+        js_redirects = re.findall(r'(?:window|document)\.location(?:\.href)?\s*=\s*["\']([^"\']+)', text, re.I)
+        all_redirects = meta_refresh + js_redirects
+        if all_redirects:
+            analysis["has_redirects"] = True
+            analysis["redirect_targets"] = all_redirects[:5]
+
+        # Iframes
+        iframe_srcs = re.findall(r'<iframe[^>]*src=["\']([^"\']+)["\']', text, re.I)
+        if iframe_srcs or '<iframe' in lower_text:
+            analysis["has_iframes"] = True
+            analysis["iframe_sources"] = iframe_srcs[:5]
+
+        # External resources (images, scripts loaded from outside)
+        ext_resources = re.findall(r'(?:src|href)=["\']((https?://)[^"\']+)["\']', text, re.I)
+        analysis["external_resources"] = list(set(r[0] for r in ext_resources))[:10]
+
+        # Data exfiltration indicators
+        if any(kw in lower_text for kw in ['sendbeacon', 'xmlhttprequest', 'fetch(', '.send(']):
+            analysis["has_data_exfil"] = True
+
+        # ── Determine threat type and build narrative ──
+        if analysis["has_password_field"] or (analysis["has_forms"] and has_email_field):
+            analysis["threat_type"] = "credential_harvesting"
+            targets = ', '.join(analysis['form_targets'][:3]) if analysis['form_targets'] else 'inconnu'
+            analysis["threat_description"] = (
+                f"Credential harvesting — cette pièce jointe HTML contient un formulaire de connexion "
+                f"avec champ mot de passe. Les identifiants saisis sont envoyés vers : {targets}. "
+            )
+            if analysis["has_obfuscation"]:
+                analysis["threat_description"] += f"Le code est obfusqué ({', '.join(analysis['obfuscation_methods'][:3])}). "
+            if analysis["has_scripts"]:
+                analysis["threat_description"] += f"Techniques JS detectees : {', '.join(analysis['script_techniques'][:3])}."
+
+        elif analysis["has_redirects"]:
+            targets = ', '.join(analysis['redirect_targets'][:2])
+            analysis["threat_type"] = "redirect_phishing"
+            analysis["threat_description"] = (
+                f"Redirection malveillante — ce fichier HTML redirige automatiquement vers : {targets}. "
+                f"L'utilisateur est amené sur un site externe contrôlé par l'attaquant."
+            )
+
+        elif analysis["has_scripts"] and analysis["has_obfuscation"]:
+            analysis["threat_type"] = "obfuscated_payload"
+            analysis["threat_description"] = (
+                f"Payload obfusqué — ce fichier HTML contient du JavaScript obfusqué "
+                f"({', '.join(analysis['obfuscation_methods'][:3])}). "
+                f"Techniques : {', '.join(analysis['script_techniques'][:3])}. "
+                f"Objectif probable : execution de code malveillant ou redirection."
+            )
+
+        elif analysis["has_forms"]:
+            analysis["threat_type"] = "data_collection"
+            analysis["threat_description"] = (
+                f"Collecte de données — ce fichier HTML contient un formulaire "
+                f"qui envoie les données vers : {', '.join(analysis['form_targets'][:3]) or 'inconnu'}."
+            )
+
+        elif analysis["has_iframes"]:
+            analysis["threat_type"] = "iframe_injection"
+            analysis["threat_description"] = (
+                f"Injection iframe — ce fichier charge du contenu externe via iframe : "
+                f"{', '.join(analysis['iframe_sources'][:2]) or 'source masquée'}."
+            )
+
+        else:
+            analysis["threat_type"] = "suspicious_html"
+            analysis["threat_description"] = "Fichier HTML en pièce jointe — vecteur courant de phishing."
+
+        iocs_out["scripts_detected"] = analysis["has_scripts"]
+        iocs_out["html_analysis"] = analysis
 
     # ── Scoring de risque ──
 
@@ -608,6 +900,41 @@ class PhishingAnalyzer:
             att_url_score = min(att_urls * 5, 10)
             score += att_url_score
             factors.append(f"{att_urls} URL(s) dans pièce(s) jointe(s) (+{att_url_score})")
+
+        # Threat Intel API enrichment scoring
+        for ip_e in iocs.get("ip_enrichment", []):
+            abuse = ip_e.get("abuse", {})
+            if abuse.get("abuse_score", 0) >= 75:
+                score += 15
+                factors.append(f"IP {ip_e['ip']} — AbuseIPDB score {abuse['abuse_score']}% (+15)")
+            elif abuse.get("abuse_score", 0) >= 25:
+                score += 8
+                factors.append(f"IP {ip_e['ip']} — AbuseIPDB score {abuse['abuse_score']}% (+8)")
+            if abuse.get("is_tor"):
+                score += 10
+                factors.append(f"IP {ip_e['ip']} — Noeud Tor (+10)")
+            vt = ip_e.get("vt", {})
+            if vt.get("malicious", 0) >= 3:
+                score += 15
+                factors.append(f"IP {ip_e['ip']} — VirusTotal {vt['malicious']} detections (+15)")
+
+        for url_e in iocs.get("url_enrichment", []):
+            if url_e.get("urlhaus", {}).get("listed"):
+                score += 20
+                factors.append(f"URL listee dans URLhaus (+20)")
+            vt = url_e.get("vt", {})
+            if vt.get("malicious", 0) >= 3:
+                score += 15
+                factors.append(f"URL — VirusTotal {vt['malicious']} detections (+15)")
+
+        for h_e in iocs.get("hash_enrichment", []):
+            vt = h_e.get("vt", {})
+            if vt.get("malicious", 0) >= 1:
+                score += 20
+                factors.append(f"Hash PJ {h_e.get('filename','')} — VirusTotal {vt['malicious']} detections (+20)")
+            if h_e.get("urlhaus", {}).get("listed"):
+                score += 15
+                factors.append(f"Hash PJ listee dans URLhaus (+15)")
 
         # Cap at 100
         score = min(score, 100)
