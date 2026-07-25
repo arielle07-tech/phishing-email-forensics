@@ -1148,6 +1148,7 @@ function renderAnalysis(a) {
       <div class="panel full-width" id="threatSection"><div class="panel-header">&#x1f6a8; Analyse des Menaces — Pieces Jointes</div><div class="panel-body" id="threatPanel"></div></div>
       <div class="panel full-width" id="ipSection"><div class="panel-header">&#x1f310; Analyse des IPs</div><div class="panel-body" id="ipPanel"></div></div>
       <div class="panel full-width" id="sandboxSection" style="display:none"><div class="panel-header">&#x1f4f7; Sandbox URLs — Captures d'ecran</div><div class="panel-body" id="sandboxPanel"></div></div>
+      <div class="panel full-width" id="impactSection" style="display:none"><div class="panel-header">&#x1f4a5; Analyse d'Impact — Scenario d'Attaque</div><div class="panel-body" id="impactPanel"></div></div>
       <div class="panel full-width"><div class="panel-header">Anomalies</div><div class="panel-body" id="anomaliesPanel"></div></div>
       <div class="panel full-width hidden" id="aiSection"><div class="panel-header">Analyse IA — Social Engineering <span class="ai-tag">AI</span></div><div class="panel-body" id="aiPanel"></div></div>
       <div class="panel hidden" id="aiRadarSection"><div class="panel-header">Radar Tactiques <span class="ai-tag">AI</span></div><div class="panel-body" id="aiRadarPanel"></div></div>
@@ -1169,6 +1170,7 @@ function renderAnalysis(a) {
   renderThreatAnalysis(a);
   renderIPAnalysis(a);
   renderSandbox(a);
+  renderImpactAnalysis(a);
   renderAnomalies(a);
 
   if (a.ai_analysis && !a.ai_analysis.error) {
@@ -1548,6 +1550,93 @@ function renderIPAnalysis(a) {
   }
 
   document.getElementById('ipPanel').innerHTML = html;
+}
+
+function renderImpactAnalysis(a) {
+  const imp = a.impact_analysis;
+  const el = document.getElementById('impactSection');
+  if (!imp || !imp.victim_scenario || !imp.victim_scenario.length) { el.style.display='none'; return; }
+  el.style.display='';
+
+  const icons = {envelope:'&#9993;','file-code':'&#128196;',link:'&#128279;',browser:'&#127760;',shuffle:'&#128256;',download:'&#11015;',key:'&#128273;','alert-triangle':'&#9888;',bug:'&#128027;',eye:'&#128065;'};
+  const impactColors = {CRITIQUE:'var(--danger)',ELEVE:'var(--warning)',MOYEN:'#f59e0b',FAIBLE:'var(--success)'};
+
+  let html = '';
+
+  // Attack classification badge
+  html += `<div style="margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">`;
+  html += `<span style="padding:4px 12px;background:var(--danger);color:#fff;border-radius:4px;font-weight:700;font-size:12px;letter-spacing:1px">${esc(imp.attack_classification).toUpperCase()}</span>`;
+  if (imp.brands_targeted && imp.brands_targeted.length) {
+    imp.brands_targeted.forEach(b => {
+      html += `<span style="padding:3px 8px;background:var(--warning);color:#000;border-radius:3px;font-size:11px;font-weight:600">${esc(b).toUpperCase()}</span>`;
+    });
+  }
+  html += '</div>';
+
+  // ── Victim scenario timeline ──
+  html += '<div style="margin-bottom:20px"><div style="font-weight:600;font-size:13px;color:var(--accent);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px">Scenario — Point de vue victime</div>';
+  html += '<div style="position:relative;padding-left:32px">';
+
+  // Vertical timeline line
+  html += '<div style="position:absolute;left:14px;top:8px;bottom:8px;width:2px;background:linear-gradient(to bottom,var(--accent),var(--danger))"></div>';
+
+  imp.victim_scenario.forEach((s,i) => {
+    const isLast = i === imp.victim_scenario.length - 1;
+    const dotColor = isLast ? 'var(--danger)' : 'var(--accent)';
+    html += `<div style="position:relative;margin-bottom:${isLast?0:16}px">`;
+    html += `<div style="position:absolute;left:-24px;top:4px;width:12px;height:12px;border-radius:50%;background:${dotColor};border:2px solid var(--bg)"></div>`;
+    html += `<div style="background:var(--bg3);border-radius:6px;padding:10px 14px;border-left:3px solid ${dotColor}">`;
+    html += `<div style="font-size:10px;font-weight:700;color:${dotColor};text-transform:uppercase;margin-bottom:4px">${icons[s.icon]||''} Etape ${s.step} — ${esc(s.action)}</div>`;
+    html += `<div style="font-size:12px;color:var(--text1);line-height:1.5">${esc(s.description)}</div>`;
+    html += '</div></div>';
+  });
+  html += '</div></div>';
+
+  // ── MITRE ATT&CK mapping ──
+  if (imp.mitre_attack && imp.mitre_attack.length) {
+    html += '<div style="margin-bottom:20px"><div style="font-weight:600;font-size:13px;color:var(--accent);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Mapping MITRE ATT&CK</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">';
+    const tacticColors = {'Initial Access':'#e74c3c','Execution':'#e67e22','Collection':'#f39c12','Exfiltration':'#9b59b6','Persistence':'#8e44ad','Impact':'#c0392b','Lateral Movement':'#d35400'};
+    imp.mitre_attack.forEach(m => {
+      const col = tacticColors[m.tactic] || 'var(--accent)';
+      html += `<div style="background:var(--bg3);border-radius:6px;padding:10px;border-top:3px solid ${col}">`;
+      html += `<div style="font-size:10px;font-weight:700;color:${col};text-transform:uppercase;margin-bottom:4px">${esc(m.tactic)}</div>`;
+      html += `<div style="font-size:11px;font-weight:600;color:var(--text1);margin-bottom:4px">${esc(m.technique)}</div>`;
+      html += `<div style="font-size:11px;color:var(--text2)">${esc(m.description)}</div>`;
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // ── Business impact assessment ──
+  if (imp.business_impact && imp.business_impact.length) {
+    html += '<div style="margin-bottom:20px"><div style="font-weight:600;font-size:13px;color:var(--accent);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Impact Business</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:var(--bg3)">';
+    html += '<th style="padding:8px;text-align:left;color:var(--text2);border-bottom:1px solid var(--border2)">Categorie</th>';
+    html += '<th style="padding:8px;text-align:center;color:var(--text2);border-bottom:1px solid var(--border2)">Niveau</th>';
+    html += '<th style="padding:8px;text-align:left;color:var(--text2);border-bottom:1px solid var(--border2)">Detail</th></tr>';
+    imp.business_impact.forEach(b => {
+      const col = impactColors[b.level] || 'var(--text1)';
+      html += `<tr><td style="padding:8px;color:var(--text1);border-bottom:1px solid var(--border2)">${esc(b.category)}</td>`;
+      html += `<td style="padding:8px;text-align:center;border-bottom:1px solid var(--border2)"><span style="padding:2px 8px;background:${col};color:#fff;border-radius:3px;font-size:10px;font-weight:600">${esc(b.level)}</span></td>`;
+      html += `<td style="padding:8px;color:var(--text2);border-bottom:1px solid var(--border2)">${esc(b.detail)}</td></tr>`;
+    });
+    html += '</table></div>';
+  }
+
+  // ── Recommended response actions ──
+  if (imp.response_actions && imp.response_actions.length) {
+    html += '<div><div style="font-weight:600;font-size:13px;color:var(--success);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Actions de Reponse Immediates</div>';
+    html += '<div style="display:grid;gap:6px">';
+    imp.response_actions.forEach((action, i) => {
+      html += `<div style="background:var(--bg3);border-radius:4px;padding:8px 12px;font-size:12px;color:var(--text1);display:flex;align-items:flex-start;gap:8px">`;
+      html += `<span style="min-width:20px;height:20px;border-radius:50%;background:var(--success);color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">${i+1}</span>`;
+      html += `<span>${esc(action)}</span></div>`;
+    });
+    html += '</div></div>';
+  }
+
+  document.getElementById('impactPanel').innerHTML = html;
 }
 
 function renderSandbox(a) {

@@ -230,6 +230,7 @@ class PhishingAnalyzer:
         self._analyze_attachments()   # avant _extract_iocs pour merger les IOCs des PJ
         self._extract_iocs()
         self._sandbox_urls()          # captures d'ecran des URLs suspectes
+        self._generate_impact_analysis()  # scenario victime + MITRE ATT&CK
         self._calculate_risk_score()
 
         # Analyse IA si activée
@@ -1102,6 +1103,260 @@ class PhishingAnalyzer:
             "total_captured": len([r for r in results if r.get("screenshot_b64")]),
         }
         print(f"[SANDBOX] {len(results)} URL(s) capturee(s)")
+
+    # ── Analyse d'impact — Scenario victime + MITRE ATT&CK ──
+
+    def _generate_impact_analysis(self):
+        """Genere un scenario d'attaque complet: point de vue victime + mapping MITRE ATT&CK."""
+        iocs = self.report.get("iocs", {})
+        attachments = self.report.get("attachments", [])
+        auth = self.report.get("authentication", {})
+        metadata = self.report.get("metadata", {})
+        sandbox = self.report.get("url_sandbox", {})
+
+        # Detect attack characteristics
+        has_credential_harvest = False
+        has_malware = False
+        has_redirect = False
+        has_brand_spoof = False
+        has_obfuscation = False
+        has_exfiltration = False
+        brands_found = []
+        threat_types = []
+        decoded_urls = []
+
+        for att in attachments:
+            content_analysis = att.get("content_analysis", {})
+            tt = content_analysis.get("threat_type", "")
+            if tt:
+                threat_types.append(tt)
+            if tt == "credential_harvesting":
+                has_credential_harvest = True
+            if tt in ("redirect_phishing",):
+                has_redirect = True
+            if content_analysis.get("has_obfuscation"):
+                has_obfuscation = True
+            if content_analysis.get("has_exfiltration"):
+                has_exfiltration = True
+            bp = content_analysis.get("brand_impersonation", [])
+            if bp:
+                has_brand_spoof = True
+                brands_found.extend(bp)
+            decoded_urls.extend(content_analysis.get("decoded_urls", []))
+            if att.get("suspicious_extension"):
+                has_malware = True
+
+        suspicious_ext = [a for a in attachments if a.get("suspicious_extension")]
+        html_att = [a for a in attachments if a.get("content_type", "").startswith("text/html") or
+                    a.get("filename", "").lower().endswith(('.html', '.htm', '.svg'))]
+
+        urls = iocs.get("urls", [])
+        suspicious_urls = [u for u in urls if u.get("suspicious_tld") or u.get("ip_based") or u.get("url_shortener")]
+        keywords = iocs.get("keywords", [])
+
+        brands_found = list(set(brands_found))
+
+        # ── Build victim scenario (step by step) ──
+        steps = []
+        impact = []
+        mitre = []
+
+        # Step 1: Email reception
+        sender = metadata.get("from", "inconnu")
+        subject = metadata.get("subject", "")
+        step1 = f"La victime recoit un email de '{sender}'"
+        if subject:
+            step1 += f" avec l'objet '{subject}'"
+        if has_brand_spoof:
+            step1 += f". L'email imite la marque {', '.join(brands_found[:2]).upper()} pour paraitre legitime"
+        if auth.get("spf", {}).get("status") in ("fail", "softfail", "absent"):
+            step1 += ". L'authentification SPF echoue — l'expediteur est probablement usurpe"
+        steps.append({"step": 1, "action": "Reception", "description": step1, "icon": "envelope"})
+
+        # MITRE: Initial Access
+        mitre.append({
+            "tactic": "Initial Access",
+            "technique": "T1566.001 — Spearphishing Attachment" if attachments else "T1566.002 — Spearphishing Link",
+            "description": "Email de phishing avec piece jointe HTML malveillante" if html_att else "Email contenant des liens vers des pages de phishing"
+        })
+
+        # Step 2: User opens attachment or clicks link
+        if html_att:
+            att_name = html_att[0].get("filename", "piece_jointe.html")
+            step2 = f"La victime ouvre la piece jointe '{att_name}'"
+            if has_obfuscation:
+                step2 += ". Le fichier HTML contient du code obfusque en Base64 qui se decode automatiquement dans le navigateur"
+            else:
+                step2 += ". Le fichier s'ouvre dans le navigateur par defaut"
+            steps.append({"step": 2, "action": "Ouverture PJ", "description": step2, "icon": "file-code"})
+
+            mitre.append({
+                "tactic": "Execution",
+                "technique": "T1204.002 — User Execution: Malicious File",
+                "description": f"Ouverture du fichier HTML '{att_name}' qui execute du code cote client"
+            })
+        elif suspicious_urls or urls:
+            target_url = suspicious_urls[0]["url"] if suspicious_urls else urls[0].get("url", "")
+            step2 = f"La victime clique sur le lien dans l'email"
+            if has_redirect:
+                step2 += f". Le lien redirige vers une page controlee par l'attaquant"
+            steps.append({"step": 2, "action": "Clic sur lien", "description": step2, "icon": "link"})
+
+        # Step 3: What the victim sees
+        if has_credential_harvest:
+            step3 = "Une page de connexion apparait"
+            if has_brand_spoof:
+                step3 += f", imitant parfaitement {brands_found[0].upper()}"
+                step3 += ". Le design, les logos et les couleurs sont copies pour tromper la victime"
+            step3 += ". Un formulaire demande l'identifiant et le mot de passe"
+            steps.append({"step": 3, "action": "Page de phishing", "description": step3, "icon": "browser"})
+
+            mitre.append({
+                "tactic": "Collection",
+                "technique": "T1056.003 — Input Capture: Web Portal Capture",
+                "description": "Formulaire web frauduleux capturant les identifiants de la victime"
+            })
+        elif has_redirect and decoded_urls:
+            step3 = f"Le navigateur est redirige a travers {len(decoded_urls)} URL(s) intermediaires"
+            step3 += " pour echapper aux filtres de securite, avant d'atteindre la page finale de l'attaquant"
+            steps.append({"step": 3, "action": "Redirections", "description": step3, "icon": "shuffle"})
+        elif has_malware:
+            step3 = "Un telechargement se lance automatiquement ou la victime est invitee a ouvrir un fichier executable"
+            steps.append({"step": 3, "action": "Telechargement", "description": step3, "icon": "download"})
+
+        # Step 4: Data exfiltration / credential theft
+        if has_credential_harvest:
+            step4 = "La victime entre ses identifiants. Les donnees sont envoyees en temps reel au serveur de l'attaquant"
+            if has_exfiltration:
+                step4 += " via une requete AJAX/fetch vers un domaine externe"
+            if decoded_urls:
+                ext_domains = list(set(urlparse(u).netloc for u in decoded_urls if urlparse(u).netloc))[:3]
+                if ext_domains:
+                    step4 += f". Domaines de collecte identifies : {', '.join(ext_domains)}"
+            steps.append({"step": 4, "action": "Vol d'identifiants", "description": step4, "icon": "key"})
+
+            mitre.append({
+                "tactic": "Exfiltration",
+                "technique": "T1041 — Exfiltration Over C2 Channel",
+                "description": "Identifiants transmis au serveur de l'attaquant via HTTP/HTTPS"
+            })
+        elif has_malware:
+            step4 = "Le malware s'installe sur le poste de la victime, potentiellement avec persistence et acces a distance"
+            steps.append({"step": 4, "action": "Installation malware", "description": step4, "icon": "bug"})
+            mitre.append({
+                "tactic": "Persistence",
+                "technique": "T1547 — Boot or Logon Autostart Execution",
+                "description": "Le malware s'installe pour persister apres redemarrage"
+            })
+
+        # Step 5: Post-compromise consequences
+        if has_credential_harvest:
+            step5 = "Avec les identifiants voles, l'attaquant peut : "
+            consequences = []
+            if any(b in ['microsoft', 'office 365', 'outlook', 'o365'] for b in [x.lower() for x in brands_found]):
+                consequences.extend([
+                    "acceder a la boite mail et lire les emails confidentiels",
+                    "envoyer des emails de phishing internes (compromission en chaine)",
+                    "acceder a OneDrive/SharePoint et voler des documents sensibles",
+                    "modifier les regles de transfert pour surveiller les communications"
+                ])
+            elif any(b in ['google', 'gmail'] for b in [x.lower() for x in brands_found]):
+                consequences.extend([
+                    "acceder a Gmail, Google Drive, et tous les services Google associes",
+                    "lire les emails et telecharger les fichiers partages",
+                    "utiliser le compte pour des campagnes de phishing ulterieures"
+                ])
+            elif any(b in ['dhl', 'msc', 'maersk', 'fedex', 'ups'] for b in [x.lower() for x in brands_found]):
+                consequences.extend([
+                    "acceder au portail logistique et modifier les expeditions",
+                    "voler les informations de tracking et contacts commerciaux",
+                    "compromettre la chaine d'approvisionnement"
+                ])
+            else:
+                consequences.extend([
+                    "acceder au compte compromis et aux donnees associees",
+                    "lancer des attaques de phishing internes (lateral phishing)",
+                    "voler des donnees sensibles ou financieres"
+                ])
+            step5 += "; ".join(consequences)
+            steps.append({"step": 5, "action": "Consequences", "description": step5, "icon": "alert-triangle"})
+
+            mitre.append({
+                "tactic": "Impact",
+                "technique": "T1078 — Valid Accounts",
+                "description": "Utilisation des identifiants voles pour acceder aux systemes internes"
+            })
+            mitre.append({
+                "tactic": "Lateral Movement",
+                "technique": "T1534 — Internal Spearphishing",
+                "description": "Envoi d'emails de phishing depuis le compte compromis vers d'autres employes"
+            })
+
+            impact = [
+                {"category": "Confidentialite", "level": "CRITIQUE", "detail": "Acces complet aux emails et documents de la victime"},
+                {"category": "Integrite", "level": "ELEVE", "detail": "L'attaquant peut envoyer des emails au nom de la victime"},
+                {"category": "Disponibilite", "level": "MOYEN", "detail": "Verrouillage potentiel du compte si l'attaquant change le mot de passe"},
+                {"category": "Financier", "level": "ELEVE", "detail": "Risque de fraude (BEC), modification de coordonnees bancaires"},
+                {"category": "Reputationnel", "level": "ELEVE", "detail": "Compromission en chaine via phishing interne"}
+            ]
+        elif has_malware:
+            step5 = "Le malware permet a l'attaquant de : controler le poste a distance, voler des fichiers, capturer les frappes clavier, se propager sur le reseau interne"
+            steps.append({"step": 5, "action": "Consequences", "description": step5, "icon": "alert-triangle"})
+            impact = [
+                {"category": "Confidentialite", "level": "CRITIQUE", "detail": "Acces total aux fichiers et donnees du poste"},
+                {"category": "Integrite", "level": "CRITIQUE", "detail": "Modification/destruction de donnees possibles"},
+                {"category": "Disponibilite", "level": "ELEVE", "detail": "Ransomware possible — chiffrement des fichiers"},
+                {"category": "Financier", "level": "CRITIQUE", "detail": "Cout de remediation, potentielle rancon"},
+            ]
+        else:
+            # Generic scenario
+            if steps and len(steps) < 5:
+                step5 = "L'attaquant collecte des informations sur la victime ou l'organisation pour preparer des attaques ulterieures plus ciblees"
+                steps.append({"step": len(steps) + 1, "action": "Reconnaissance", "description": step5, "icon": "eye"})
+
+        # Determine primary attack classification
+        if has_credential_harvest and has_brand_spoof:
+            attack_class = "Credential Harvesting avec Brand Impersonation"
+        elif has_credential_harvest:
+            attack_class = "Credential Harvesting"
+        elif has_malware:
+            attack_class = "Malware Delivery"
+        elif has_redirect:
+            attack_class = "Redirect Phishing"
+        elif has_obfuscation:
+            attack_class = "Obfuscated Payload"
+        else:
+            attack_class = "Phishing Generique"
+
+        # Immediate response actions
+        response_actions = [
+            "Isoler l'email et empecher d'autres utilisateurs de l'ouvrir",
+            "Bloquer les IOCs identifies (domaines, IPs, hashes) au niveau du proxy et du pare-feu",
+            "Verifier dans les logs si des utilisateurs ont clique ou soumis des identifiants",
+        ]
+        if has_credential_harvest:
+            response_actions.extend([
+                "Forcer la reinitialisation du mot de passe pour tout utilisateur ayant soumis ses identifiants",
+                "Verifier les regles de transfert email et les sessions actives sur les comptes potentiellement compromis",
+                "Activer/verifier le MFA sur tous les comptes concernes"
+            ])
+        if has_malware:
+            response_actions.extend([
+                "Isoler le poste du reseau immediatement",
+                "Lancer un scan antivirus complet et verifier les processus en cours",
+                "Analyser le fichier dans une sandbox (ex: Any.Run, VirusTotal)"
+            ])
+        response_actions.append("Documenter l'incident et notifier l'equipe SOC")
+
+        self.report["impact_analysis"] = {
+            "attack_classification": attack_class,
+            "victim_scenario": steps,
+            "mitre_attack": mitre,
+            "business_impact": impact,
+            "response_actions": response_actions,
+            "brands_targeted": brands_found,
+            "threat_types_detected": list(set(threat_types)),
+        }
 
     # ── Scoring de risque ──
 
