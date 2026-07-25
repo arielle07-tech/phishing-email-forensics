@@ -784,6 +784,211 @@ class PhishingAnalyzer:
 
         return meta if (meta["format"] or meta["suspicious_indicators"]) else None
 
+    def _analyze_embedded_document(self, doc_bytes: bytes, mime_type: str, html_wrapper: str) -> dict:
+        """Analyse forensique d'un document embarque (PDF, Office, etc.) dans une PJ HTML."""
+        result = {
+            "type": "unknown",
+            "mime": mime_type,
+            "size_bytes": len(doc_bytes),
+            "is_fake_viewer": False,
+            "viewer_title": "",
+            "text_content": "",
+            "urls": [],
+            "phishing_urls": [],
+            "images_count": 0,
+            "pages": 0,
+            "metadata": {},
+            "phishing_indicators": [],
+            "victim_targeting": {},
+            "call_to_action": "",
+            "producer": "",
+        }
+
+        # Detect fake viewer pattern from wrapper HTML
+        wrapper_lower = html_wrapper.lower()
+        viewer_titles = re.findall(r'<title[^>]*>([^<]+)</title>', html_wrapper, re.I)
+        if viewer_titles:
+            result["viewer_title"] = viewer_titles[0].strip()
+        viewer_keywords = ['pdf viewer', 'document viewer', 'view document', 'secure document',
+                           'file preview', 'preview', 'adobe', 'acrobat']
+        if any(kw in wrapper_lower for kw in viewer_keywords):
+            result["is_fake_viewer"] = True
+            result["phishing_indicators"].append("Faux lecteur de documents — la PJ HTML simule un viewer PDF/document")
+        if '<embed' in wrapper_lower and 'data:application/pdf' in wrapper_lower:
+            result["is_fake_viewer"] = True
+            result["phishing_indicators"].append("PDF embarque via data URI dans un tag <embed> — contourne les filtres email")
+
+        # Analyze PDF content
+        if doc_bytes[:5] == b'%PDF-' or 'pdf' in mime_type.lower():
+            result["type"] = "pdf"
+            try:
+                import fitz  # PyMuPDF
+                doc = fitz.open(stream=doc_bytes, filetype="pdf")
+                result["pages"] = doc.page_count
+                result["metadata"] = {k: v for k, v in (doc.metadata or {}).items() if v}
+                result["producer"] = doc.metadata.get("producer", "") if doc.metadata else ""
+
+                all_text = ""
+                all_links = []
+                total_images = 0
+
+                for page in doc:
+                    page_text = page.get_text()
+                    all_text += page_text + "\n"
+                    for link in page.get_links():
+                        if link.get("uri"):
+                            all_links.append(link["uri"])
+                    total_images += len(page.get_images())
+
+                result["text_content"] = all_text.strip()
+                result["urls"] = list(set(all_links))
+                result["images_count"] = total_images
+
+                # Analyze PDF text for phishing patterns
+                text_lower = all_text.lower()
+
+                # Call to action detection
+                cta_patterns = [
+                    (r'click\s+(?:the\s+)?(?:button|here|link|below)\s+to\s+(?:view|open|access|download|verify|confirm)', 'en'),
+                    (r'view\s+(?:now|document|file)', 'en'),
+                    (r'open\s+(?:now|document|file)', 'en'),
+                    (r'cliquez\s+(?:ici|sur le bouton)\s+pour', 'fr'),
+                    (r'voir\s+(?:le\s+)?document', 'fr'),
+                ]
+                for pattern, lang in cta_patterns:
+                    cta_match = re.search(pattern, text_lower)
+                    if cta_match:
+                        result["call_to_action"] = cta_match.group(0).strip()
+                        result["phishing_indicators"].append(f"Call-to-action: \"{result['call_to_action']}\"")
+                        break
+
+                # "Securely sent" / document lure patterns
+                lure_patterns = ['securely sent', 'encrypted document', 'secure document',
+                                 'confidential', 'protected document', 'document securise',
+                                 'this document is', 'vous avez recu']
+                for lure in lure_patterns:
+                    if lure in text_lower:
+                        result["phishing_indicators"].append(f"Leurre de document securise: \"{lure}\"")
+                        break
+
+                # Victim email in PDF text
+                recipient = self.report.get("metadata", {}).get("to", "")
+                if recipient:
+                    # Extract email from "Name <email>" format
+                    email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', recipient)
+                    if email_match:
+                        victim_email = email_match.group(0).lower()
+                        if victim_email in text_lower:
+                            result["phishing_indicators"].append(f"Email de la victime integre dans le PDF: {victim_email}")
+                            result["victim_targeting"]["email_in_pdf"] = True
+
+                # Analyze each URL for phishing characteristics
+                for url in all_links:
+                    url_analysis = self._analyze_phishing_url(url)
+                    if url_analysis["is_phishing"]:
+                        result["phishing_urls"].append(url_analysis)
+
+                doc.close()
+
+            except ImportError:
+                # PyMuPDF not installed — fallback to regex parsing
+                result["metadata"]["note"] = "PyMuPDF non installe — analyse PDF limitee"
+                pdf_text = doc_bytes.decode('latin-1', errors='ignore')
+
+                # Extract URI actions from raw PDF
+                uris = re.findall(r'/URI\s*\(([^)]+)\)', pdf_text)
+                result["urls"] = list(set(uris))
+                for url in uris:
+                    url_analysis = self._analyze_phishing_url(url)
+                    if url_analysis["is_phishing"]:
+                        result["phishing_urls"].append(url_analysis)
+
+                # Extract text from raw PDF (basic)
+                text_parts = re.findall(r'\(([^)]{3,})\)', pdf_text)
+                readable = [t for t in text_parts if re.search(r'[a-zA-Z]{3,}', t)]
+                result["text_content"] = ' '.join(readable[:50])
+
+                # Producer
+                prod = re.search(r'/Producer\s*\(([^)]+)\)', pdf_text)
+                if prod:
+                    result["producer"] = prod.group(1)
+
+            except Exception as e:
+                result["metadata"]["error"] = str(e)[:100]
+
+        return result
+
+    def _analyze_phishing_url(self, url: str) -> dict:
+        """Analyse forensique d'une URL pour detecter les indicateurs de phishing."""
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        path = parsed.path
+
+        analysis = {
+            "url": url,
+            "domain": domain,
+            "is_phishing": False,
+            "indicators": [],
+            "risk_score": 0,
+            "victim_name_in_url": None,
+            "victim_domain_in_url": None,
+        }
+
+        # Random/generated subdomain detection
+        subdomain = domain.split('.')[0] if '.' in domain else ''
+        if len(subdomain) > 15 and re.match(r'^[a-z0-9]+$', subdomain):
+            analysis["indicators"].append(f"Sous-domaine genere aleatoirement: {subdomain}")
+            analysis["risk_score"] += 25
+
+        # Root domain analysis — compromised legitimate site
+        root_domain = '.'.join(domain.split('.')[-2:]) if domain.count('.') >= 1 else domain
+        non_tech_domains = ['brewery', 'shop', 'store', 'restaurant', 'hotel', 'farm',
+                           'salon', 'clinic', 'church', 'school', 'bakery', 'florist']
+        if any(kw in root_domain for kw in non_tech_domains):
+            analysis["indicators"].append(f"Domaine compromise (non-tech): {root_domain}")
+            analysis["risk_score"] += 20
+
+        # Path analysis — random segments
+        segments = [s for s in path.split('/') if s]
+        random_segs = [s for s in segments if len(s) > 10 and re.match(r'^[a-z0-9]+$', s)]
+        if len(random_segs) >= 3:
+            analysis["indicators"].append(f"{len(random_segs)}/{len(segments)} segments de chemin obfusques/aleatoires")
+            analysis["risk_score"] += 15
+
+        # Victim name in URL path
+        name_matches = re.findall(r'[A-Z][a-z]+\.[A-Z][a-z]+', path)
+        if name_matches:
+            analysis["victim_name_in_url"] = name_matches[0]
+            analysis["indicators"].append(f"Nom de la victime dans l'URL: {name_matches[0]}")
+            analysis["risk_score"] += 20
+
+        # Victim/target domain in URL path
+        domain_in_path = re.findall(r'([a-z0-9-]+\.(?:com|fr|org|net|co\.uk|de|io))', path.lower())
+        if domain_in_path:
+            analysis["victim_domain_in_url"] = domain_in_path[0]
+            analysis["indicators"].append(f"Domaine cible dans le chemin URL: {domain_in_path[0]}")
+            analysis["risk_score"] += 20
+
+        # Brand name embedded in random path (e.g., "k4ovwl1ep1p7amvmg0xmsc" contains "msc")
+        brand_names = ['msc', 'dhl', 'microsoft', 'google', 'apple', 'paypal', 'amazon']
+        for brand in brand_names:
+            for seg in segments:
+                if brand in seg.lower() and len(seg) > len(brand) + 5 and re.search(r'[0-9]', seg):
+                    analysis["indicators"].append(f"Marque '{brand}' camuflee dans un segment aleatoire: {seg}")
+                    analysis["risk_score"] += 10
+                    break
+
+        # Very long URL path (tracking/evasion)
+        if len(path) > 100:
+            analysis["indicators"].append(f"Chemin URL anormalement long ({len(path)} chars) — tracking ou evasion")
+            analysis["risk_score"] += 5
+
+        # Final determination
+        if analysis["risk_score"] >= 30:
+            analysis["is_phishing"] = True
+
+        return analysis
+
     def _scan_attachment_content(self, data: bytes, iocs_out: dict):
         """Analyse approfondie du contenu d'une pièce jointe HTML."""
         try:
@@ -814,15 +1019,34 @@ class PhishingAnalyzer:
         for ip in ips:
             iocs_out["ips"].append({"ip": ip, "is_private": self._is_private_ip(ip), "source": "attachment"})
 
+        # ── Detect embedded documents (data URI / Base64) ──
+        import base64 as b64_module
+        embedded_doc = None  # Will hold extracted PDF/doc analysis
+
+        # Check for data URI embeds (fake PDF viewer, fake document viewer)
+        data_uri_match = re.search(r'(?:src|data)\s*=\s*["\']data:([^;]+);base64,([^"\']+)["\']', text, re.I)
+        if data_uri_match:
+            embed_mime = data_uri_match.group(1)
+            embed_b64 = data_uri_match.group(2)
+            try:
+                embed_bytes = b64_module.b64decode(embed_b64)
+                embedded_doc = self._analyze_embedded_document(embed_bytes, embed_mime, text)
+            except Exception as e:
+                embedded_doc = {"type": "unknown", "error": str(e)[:100]}
+
         # ── Decode Base64 content to analyze hidden payload ──
         decoded_text = ""
         b64_matches = re.findall(r'[A-Za-z0-9+/=]{200,}', text)
         decoded_segments = []
         if b64_matches:
-            import base64
             for b64 in b64_matches:
                 try:
-                    decoded = base64.b64decode(b64).decode('utf-8', errors='ignore')
+                    decoded_bytes = b64_module.b64decode(b64)
+                    # Check if it's a PDF or binary document
+                    if decoded_bytes[:5] == b'%PDF-' and not embedded_doc:
+                        embedded_doc = self._analyze_embedded_document(decoded_bytes, 'application/pdf', text)
+                        continue
+                    decoded = decoded_bytes.decode('utf-8', errors='ignore')
                     if len(decoded) > 50 and ('<' in decoded or 'http' in decoded.lower()):
                         decoded_segments.append(decoded)
                         decoded_text += decoded + "\n"
@@ -1071,6 +1295,65 @@ class PhishingAnalyzer:
             analysis["threat_type"] = "suspicious_html"
             analysis["threat_description"] = f"Fichier HTML en pièce jointe ({analysis['file_size']:,} octets) — vecteur courant de phishing."
 
+        # ── Integrate embedded document analysis ──
+        if embedded_doc:
+            analysis["embedded_document"] = embedded_doc
+
+            # Add embedded doc URLs to IOCs
+            for url in embedded_doc.get("urls", []):
+                parsed = urlparse(url)
+                if url not in [u["url"] for u in iocs_out["urls"]]:
+                    iocs_out["urls"].append({
+                        "url": url, "domain": parsed.netloc, "scheme": parsed.scheme,
+                        "path": parsed.path,
+                        "suspicious_tld": any(parsed.netloc.endswith(tld) for tld in SUSPICIOUS_TLDS),
+                        "ip_based": bool(IP_PATTERN.match(parsed.netloc)),
+                        "url_shortener": self._is_url_shortener(parsed.netloc),
+                        "mismatched_display": False, "source": f"embedded_{embedded_doc['type']}"
+                    })
+
+            # Override threat type and description if embedded doc has strong signals
+            if embedded_doc.get("phishing_urls") or embedded_doc.get("phishing_indicators"):
+                phish_urls = embedded_doc.get("phishing_urls", [])
+                indicators = embedded_doc.get("phishing_indicators", [])
+
+                if embedded_doc.get("is_fake_viewer"):
+                    analysis["threat_type"] = "fake_document_viewer"
+                    desc = f"Faux lecteur de documents — "
+                    if embedded_doc.get("viewer_title"):
+                        desc += f"titre \"{embedded_doc['viewer_title']}\". "
+                    desc += f"Le fichier HTML embarque un {embedded_doc['type'].upper()} de {embedded_doc['size_bytes']:,} octets "
+                    desc += f"encode en Base64 via data URI. "
+
+                    if embedded_doc.get("text_content"):
+                        # Summarize PDF text
+                        pdf_text = embedded_doc["text_content"][:200].replace('\n', ' ').strip()
+                        desc += f"Contenu du PDF : \"{pdf_text}\". "
+
+                    if phish_urls:
+                        pu = phish_urls[0]
+                        desc += f"URL de phishing detectee : {pu['domain']} "
+                        if pu.get("victim_name_in_url"):
+                            desc += f"(nom de la victime \"{pu['victim_name_in_url']}\" integre dans l'URL). "
+                        if pu.get("victim_domain_in_url"):
+                            desc += f"Domaine cible \"{pu['victim_domain_in_url']}\" dans le chemin. "
+                        desc += f"Score de risque URL : {pu['risk_score']}/100. "
+                        desc += f"Indicateurs : {'; '.join(pu['indicators'][:4])}. "
+
+                    if embedded_doc.get("producer"):
+                        desc += f"Generateur PDF : {embedded_doc['producer']}. "
+
+                    if embedded_doc.get("call_to_action"):
+                        desc += f"Appel a l'action : \"{embedded_doc['call_to_action']}\". "
+
+                    desc += "Technique avancee : le PDF est invisible aux filtres email car encode en Base64 dans le HTML."
+                    analysis["threat_description"] = desc
+
+                    # Update brand detection from embedded doc
+                    victim_target = embedded_doc.get("victim_targeting", {})
+                    analysis["victim_targeting"] = victim_target
+                    analysis["embedded_phishing_urls"] = phish_urls
+
         iocs_out["scripts_detected"] = analysis["has_scripts"]
         iocs_out["html_analysis"] = analysis
 
@@ -1144,7 +1427,10 @@ class PhishingAnalyzer:
                 brands_found.extend(bp)
             decoded_urls.extend(content_analysis.get("decoded_urls", []))
             if att.get("suspicious_extension"):
-                has_malware = True
+                # HTML/HTM/SVG = phishing page, not malware
+                fname = att.get("filename", "").lower()
+                if not fname.endswith(('.html', '.htm', '.svg', '.shtml')):
+                    has_malware = True
 
         suspicious_ext = [a for a in attachments if a.get("suspicious_extension")]
         html_att = [a for a in attachments if a.get("content_type", "").startswith("text/html") or
@@ -1156,6 +1442,7 @@ class PhishingAnalyzer:
 
         # Also check iocs-level html_attachment_analysis
         html_analysis = iocs.get("html_attachment_analysis", {})
+        embedded = html_analysis.get("embedded_document", {})
         if html_analysis.get("brand_impersonation"):
             has_brand_spoof = True
             brands_found.extend(html_analysis["brand_impersonation"])
@@ -1168,6 +1455,13 @@ class PhishingAnalyzer:
         if html_analysis.get("threat_type"):
             threat_types.append(html_analysis["threat_type"])
         decoded_urls.extend(html_analysis.get("decoded_urls", []))
+        # Embedded document phishing URLs
+        if embedded.get("phishing_urls"):
+            for pu in embedded["phishing_urls"]:
+                decoded_urls.append(pu["url"])
+        has_fake_viewer = embedded.get("is_fake_viewer", False)
+        embedded_pdf_text = embedded.get("text_content", "")
+        embedded_cta = embedded.get("call_to_action", "")
 
         brands_found = list(set(brands_found))
 
@@ -1199,7 +1493,11 @@ class PhishingAnalyzer:
         if html_att:
             att_name = html_att[0].get("filename", "piece_jointe.html")
             step2 = f"La victime ouvre la piece jointe '{att_name}'"
-            if has_obfuscation:
+            if has_fake_viewer:
+                viewer_title = embedded.get("viewer_title", "PDF Viewer")
+                step2 += f". Le navigateur affiche un faux lecteur de documents intitule \"{viewer_title}\""
+                step2 += f". En realite, le HTML embarque un PDF de {embedded.get('size_bytes', 0):,} octets encode en Base64"
+            elif has_obfuscation:
                 step2 += ". Le fichier HTML contient du code obfusque en Base64 qui se decode automatiquement dans le navigateur"
             else:
                 step2 += ". Le fichier s'ouvre dans le navigateur par defaut"
@@ -1210,6 +1508,12 @@ class PhishingAnalyzer:
                 "technique": "T1204.002 — User Execution: Malicious File",
                 "description": f"Ouverture du fichier HTML '{att_name}' qui execute du code cote client"
             })
+            if has_fake_viewer:
+                mitre.append({
+                    "tactic": "Defense Evasion",
+                    "technique": "T1027.006 — HTML Smuggling",
+                    "description": "PDF embarque dans un fichier HTML via data URI Base64 — contourne les filtres email et les passerelles de securite"
+                })
         elif suspicious_urls or urls:
             target_url = suspicious_urls[0]["url"] if suspicious_urls else urls[0].get("url", "")
             step2 = f"La victime clique sur le lien dans l'email"
@@ -1218,7 +1522,26 @@ class PhishingAnalyzer:
             steps.append({"step": 2, "action": "Clic sur lien", "description": step2, "icon": "link"})
 
         # Step 3: What the victim sees
-        if has_credential_harvest:
+        if has_fake_viewer and embedded.get("phishing_urls"):
+            pu = embedded["phishing_urls"][0]
+            step3 = f"Le PDF affiche un message personalise — "
+            if embedded_pdf_text:
+                # Clean up for display
+                clean_text = embedded_pdf_text.replace('\n', ' ').strip()[:150]
+                step3 += f"\"{clean_text}\". "
+            if embedded_cta:
+                step3 += f"Un bouton \"{embedded_cta.upper()}\" invite a cliquer. "
+            step3 += f"Le lien mene vers {pu['domain']}"
+            if pu.get("victim_name_in_url"):
+                step3 += f" — l'URL contient le nom de la victime ({pu['victim_name_in_url']}) et son domaine ({pu.get('victim_domain_in_url','')}) pour personnaliser l'attaque"
+            steps.append({"step": 3, "action": "Faux document PDF", "description": step3, "icon": "browser"})
+
+            mitre.append({
+                "tactic": "Collection",
+                "technique": "T1598.003 — Phishing for Information: Spearphishing Link",
+                "description": f"Lien de phishing personalise avec le nom et le domaine de la victime dans l'URL"
+            })
+        elif has_credential_harvest:
             step3 = "Une page de connexion apparait"
             if has_brand_spoof:
                 step3 += f", imitant parfaitement {brands_found[0].upper()}"
@@ -1235,12 +1558,36 @@ class PhishingAnalyzer:
             step3 = f"Le navigateur est redirige a travers {len(decoded_urls)} URL(s) intermediaires"
             step3 += " pour echapper aux filtres de securite, avant d'atteindre la page finale de l'attaquant"
             steps.append({"step": 3, "action": "Redirections", "description": step3, "icon": "shuffle"})
+        elif has_obfuscation and has_brand_spoof:
+            step3 = "Le code Base64 se decode automatiquement et affiche une page imitant " + ', '.join(b.upper() for b in brands_found[:2])
+            step3 += ". La victime voit une interface apparemment legitime (logo, couleurs, mise en page copiee)"
+            steps.append({"step": 3, "action": "Page frauduleuse", "description": step3, "icon": "browser"})
+
+            mitre.append({
+                "tactic": "Defense Evasion",
+                "technique": "T1027 — Obfuscated Files or Information",
+                "description": "Contenu HTML encode en Base64 pour echapper aux filtres email et antivirus"
+            })
         elif has_malware:
             step3 = "Un telechargement se lance automatiquement ou la victime est invitee a ouvrir un fichier executable"
             steps.append({"step": 3, "action": "Telechargement", "description": step3, "icon": "download"})
 
         # Step 4: Data exfiltration / credential theft
-        if has_credential_harvest:
+        if has_fake_viewer and embedded.get("phishing_urls"):
+            pu = embedded["phishing_urls"][0]
+            step4 = "La victime clique sur le bouton et atterrit sur une page de phishing externe"
+            step4 += f" hebergee sur {pu['domain']}"
+            if pu.get("indicators"):
+                step4 += f". Indicateurs suspects : {'; '.join(pu['indicators'][:3])}"
+            step4 += ". La page demande probablement des identifiants de connexion ou redirige vers un payload malveillant"
+            steps.append({"step": 4, "action": "Page de phishing externe", "description": step4, "icon": "key"})
+
+            mitre.append({
+                "tactic": "Credential Access",
+                "technique": "T1556 — Modify Authentication Process",
+                "description": f"Page de phishing sur domaine compromis ({pu['domain']}) collectant les identifiants"
+            })
+        elif has_credential_harvest:
             step4 = "La victime entre ses identifiants. Les donnees sont envoyees en temps reel au serveur de l'attaquant"
             if has_exfiltration:
                 step4 += " via une requete AJAX/fetch vers un domaine externe"
@@ -1255,6 +1602,17 @@ class PhishingAnalyzer:
                 "technique": "T1041 — Exfiltration Over C2 Channel",
                 "description": "Identifiants transmis au serveur de l'attaquant via HTTP/HTTPS"
             })
+        elif has_obfuscation and has_brand_spoof:
+            step4 = "La page frauduleuse invite la victime a saisir ses identifiants ou informations personnelles"
+            step4 += f" sur un formulaire imitant {brands_found[0].upper()}"
+            step4 += ". Les donnees saisies sont envoyees directement au serveur de l'attaquant"
+            steps.append({"step": 4, "action": "Collecte de donnees", "description": step4, "icon": "key"})
+
+            mitre.append({
+                "tactic": "Collection",
+                "technique": "T1056.003 — Input Capture: Web Portal Capture",
+                "description": "Page web frauduleuse capturant les informations saisies par la victime"
+            })
         elif has_malware:
             step4 = "Le malware s'installe sur le poste de la victime, potentiellement avec persistence et acces a distance"
             steps.append({"step": 4, "action": "Installation malware", "description": step4, "icon": "bug"})
@@ -1264,8 +1622,10 @@ class PhishingAnalyzer:
                 "description": "Le malware s'installe pour persister apres redemarrage"
             })
 
-        # Step 5: Post-compromise consequences
-        if has_credential_harvest:
+        # Step 5: Post-compromise consequences (skip if already handled by fake_viewer)
+        if has_fake_viewer and embedded.get("phishing_urls"):
+            pass  # Already handled above
+        elif has_credential_harvest:
             step5 = "Avec les identifiants voles, l'attaquant peut : "
             consequences = []
             if any(b in ['microsoft', 'office 365', 'outlook', 'o365'] for b in [x.lower() for x in brands_found]):
@@ -1314,6 +1674,38 @@ class PhishingAnalyzer:
                 {"category": "Financier", "level": "ELEVE", "detail": "Risque de fraude (BEC), modification de coordonnees bancaires"},
                 {"category": "Reputationnel", "level": "ELEVE", "detail": "Compromission en chaine via phishing interne"}
             ]
+        elif has_obfuscation and has_brand_spoof:
+            step5 = "Avec les donnees volees, l'attaquant peut : "
+            consequences = []
+            if any(b in ['dhl', 'msc', 'maersk', 'fedex', 'ups'] for b in [x.lower() for x in brands_found]):
+                consequences.extend([
+                    "acceder aux portails logistiques et detourner des expeditions",
+                    "voler des informations commerciales et contacts clients",
+                    "lancer des fraudes BEC (Business Email Compromise) sur la chaine d'approvisionnement",
+                    "utiliser les identifiants pour compromettre d'autres comptes (reutilisation de mots de passe)"
+                ])
+            else:
+                consequences.extend([
+                    "acceder au compte compromis et aux donnees associees",
+                    "lancer des attaques de phishing internes",
+                    "voler des donnees sensibles ou financieres"
+                ])
+            step5 += "; ".join(consequences)
+            steps.append({"step": 5, "action": "Consequences", "description": step5, "icon": "alert-triangle"})
+
+            mitre.append({
+                "tactic": "Impact",
+                "technique": "T1078 — Valid Accounts",
+                "description": "Utilisation des identifiants voles pour acceder aux systemes de la victime"
+            })
+
+            impact = [
+                {"category": "Confidentialite", "level": "CRITIQUE", "detail": "Vol d'identifiants et acces aux comptes de la victime"},
+                {"category": "Integrite", "level": "ELEVE", "detail": "L'attaquant peut agir au nom de la victime"},
+                {"category": "Disponibilite", "level": "MOYEN", "detail": "Verrouillage potentiel des comptes compromis"},
+                {"category": "Financier", "level": "ELEVE", "detail": "Fraude BEC, detournement de transactions commerciales"},
+                {"category": "Reputationnel", "level": "ELEVE", "detail": "Compromission en chaine via le compte vole"}
+            ]
         elif has_malware:
             step5 = "Le malware permet a l'attaquant de : controler le poste a distance, voler des fichiers, capturer les frappes clavier, se propager sur le reseau interne"
             steps.append({"step": 5, "action": "Consequences", "description": step5, "icon": "alert-triangle"})
@@ -1329,8 +1721,45 @@ class PhishingAnalyzer:
                 step5 = "L'attaquant collecte des informations sur la victime ou l'organisation pour preparer des attaques ulterieures plus ciblees"
                 steps.append({"step": len(steps) + 1, "action": "Reconnaissance", "description": step5, "icon": "eye"})
 
+        # Step 5 for fake viewer
+        if has_fake_viewer and embedded.get("phishing_urls") and not has_credential_harvest:
+            pu = embedded["phishing_urls"][0]
+            step5 = "Avec les identifiants voles, l'attaquant peut : "
+            consequences = []
+            if any(b in ['dhl', 'msc', 'maersk', 'fedex', 'ups'] for b in [x.lower() for x in brands_found]):
+                consequences.extend([
+                    "acceder aux portails logistiques et detourner des expeditions",
+                    "voler des informations commerciales et contacts clients",
+                    "lancer des fraudes BEC (Business Email Compromise) sur la chaine d'approvisionnement",
+                    "utiliser les identifiants pour compromettre d'autres comptes (reutilisation de mots de passe)"
+                ])
+            else:
+                consequences.extend([
+                    "acceder au compte compromis et aux donnees associees",
+                    "lancer des attaques de phishing internes (lateral phishing)",
+                    "voler des donnees sensibles ou financieres"
+                ])
+            step5 += "; ".join(consequences)
+            steps.append({"step": 5, "action": "Consequences", "description": step5, "icon": "alert-triangle"})
+
+            mitre.append({
+                "tactic": "Impact",
+                "technique": "T1078 — Valid Accounts",
+                "description": "Utilisation des identifiants voles pour acceder aux systemes de la victime"
+            })
+
+            impact = [
+                {"category": "Confidentialite", "level": "CRITIQUE", "detail": "Vol d'identifiants et acces aux comptes de la victime"},
+                {"category": "Integrite", "level": "ELEVE", "detail": "L'attaquant peut agir au nom de la victime"},
+                {"category": "Disponibilite", "level": "MOYEN", "detail": "Verrouillage potentiel des comptes compromis"},
+                {"category": "Financier", "level": "ELEVE", "detail": "Fraude BEC, detournement de transactions commerciales"},
+                {"category": "Reputationnel", "level": "ELEVE", "detail": "Compromission en chaine via le compte vole"}
+            ]
+
         # Determine primary attack classification
-        if has_credential_harvest and has_brand_spoof:
+        if has_fake_viewer:
+            attack_class = "HTML Smuggling — Faux Lecteur PDF avec Lien de Phishing Personalise"
+        elif has_credential_harvest and has_brand_spoof:
             attack_class = "Credential Harvesting avec Brand Impersonation"
         elif has_credential_harvest:
             attack_class = "Credential Harvesting"
@@ -1338,8 +1767,12 @@ class PhishingAnalyzer:
             attack_class = "Malware Delivery"
         elif has_redirect:
             attack_class = "Redirect Phishing"
+        elif has_obfuscation and has_brand_spoof:
+            attack_class = "Phishing Obfusque avec Imitation de Marque"
         elif has_obfuscation:
             attack_class = "Obfuscated Payload"
+        elif has_brand_spoof:
+            attack_class = "Brand Impersonation"
         else:
             attack_class = "Phishing Generique"
 
@@ -1354,6 +1787,12 @@ class PhishingAnalyzer:
                 "Forcer la reinitialisation du mot de passe pour tout utilisateur ayant soumis ses identifiants",
                 "Verifier les regles de transfert email et les sessions actives sur les comptes potentiellement compromis",
                 "Activer/verifier le MFA sur tous les comptes concernes"
+            ])
+        if has_obfuscation and has_brand_spoof and not has_credential_harvest:
+            response_actions.extend([
+                "Analyser la piece jointe HTML dans une sandbox pour identifier la page de phishing",
+                "Forcer la reinitialisation des mots de passe si un utilisateur a ouvert la PJ",
+                "Signaler la page de phishing aux marques imitees (" + ', '.join(b.upper() for b in brands_found[:3]) + ")"
             ])
         if has_malware:
             response_actions.extend([
@@ -1468,6 +1907,23 @@ class PhishingAnalyzer:
         if html_analysis.get("has_data_exfil"):
             score += 15
             factors.append("Exfiltration de donnees detectee (+15)")
+        embedded = html_analysis.get("embedded_document", {})
+        if embedded.get("is_fake_viewer"):
+            score += 20
+            factors.append(f"Faux lecteur de documents ({embedded.get('type','').upper()}) (+20)")
+        if embedded.get("phishing_urls"):
+            score += 20
+            pu = embedded["phishing_urls"][0]
+            factors.append(f"URL de phishing dans {embedded.get('type','doc').upper()}: {pu['domain']} (+20)")
+            if pu.get("victim_name_in_url"):
+                score += 10
+                factors.append(f"Nom de la victime dans l'URL: {pu['victim_name_in_url']} (+10)")
+            if pu.get("victim_domain_in_url"):
+                score += 5
+                factors.append(f"Domaine cible dans l'URL: {pu['victim_domain_in_url']} (+5)")
+        if embedded.get("call_to_action"):
+            score += 5
+            factors.append(f"Call-to-action dans PDF: \"{embedded['call_to_action']}\" (+5)")
         if html_analysis.get("has_iframes"):
             score += 10
             factors.append("Iframes detectes dans PJ HTML (+10)")

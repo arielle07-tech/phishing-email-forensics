@@ -26,6 +26,9 @@ python-docx>=1.0         # Word (.docx) incident reports
 # === Threat Intel Enrichment ===
 requests>=2.31           # HTTP calls for threat intel APIs (ipapi, AbuseIPDB, VT, URLhaus)
 
+# === Embedded Document Analysis ===
+PyMuPDF>=1.24            # PDF parsing for embedded document forensics
+
 # === URL Sandboxing ===
 playwright>=1.40         # Headless Chromium for URL screenshot capture
 
