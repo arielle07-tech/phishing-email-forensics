@@ -29,3 +29,9 @@ Thumbs.db
 
 # Docker
 *.log
+
+# Test emails / samples
+Analyse Mail Test/
+*.msg
+*.eml
+*.zip
