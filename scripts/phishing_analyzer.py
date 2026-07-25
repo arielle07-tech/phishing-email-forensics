@@ -1154,6 +1154,21 @@ class PhishingAnalyzer:
         suspicious_urls = [u for u in urls if u.get("suspicious_tld") or u.get("ip_based") or u.get("url_shortener")]
         keywords = iocs.get("keywords", [])
 
+        # Also check iocs-level html_attachment_analysis
+        html_analysis = iocs.get("html_attachment_analysis", {})
+        if html_analysis.get("brand_impersonation"):
+            has_brand_spoof = True
+            brands_found.extend(html_analysis["brand_impersonation"])
+        if html_analysis.get("has_obfuscation"):
+            has_obfuscation = True
+        if html_analysis.get("has_data_exfil"):
+            has_exfiltration = True
+        if html_analysis.get("has_forms") and html_analysis.get("has_password_field"):
+            has_credential_harvest = True
+        if html_analysis.get("threat_type"):
+            threat_types.append(html_analysis["threat_type"])
+        decoded_urls.extend(html_analysis.get("decoded_urls", []))
+
         brands_found = list(set(brands_found))
 
         # ── Build victim scenario (step by step) ──
@@ -1437,6 +1452,31 @@ class PhishingAnalyzer:
             att_url_score = min(att_urls * 5, 10)
             score += att_url_score
             factors.append(f"{att_urls} URL(s) dans pièce(s) jointe(s) (+{att_url_score})")
+
+        # HTML attachment deep analysis scoring
+        html_analysis = iocs.get("html_attachment_analysis", {})
+        if html_analysis.get("has_obfuscation"):
+            score += 20
+            factors.append("Contenu obfusque (Base64) dans PJ HTML (+20)")
+        if html_analysis.get("brand_impersonation"):
+            brands = html_analysis["brand_impersonation"]
+            score += 15
+            factors.append(f"Imitation de marque : {', '.join(brands[:3]).upper()} (+15)")
+        if html_analysis.get("has_decoded_content"):
+            score += 10
+            factors.append("Contenu cache decode depuis Base64 (+10)")
+        if html_analysis.get("has_data_exfil"):
+            score += 15
+            factors.append("Exfiltration de donnees detectee (+15)")
+        if html_analysis.get("has_iframes"):
+            score += 10
+            factors.append("Iframes detectes dans PJ HTML (+10)")
+        if html_analysis.get("has_password_field"):
+            score += 20
+            factors.append("Champ mot de passe dans PJ HTML (+20)")
+        elif html_analysis.get("has_forms"):
+            score += 10
+            factors.append("Formulaire dans PJ HTML (+10)")
 
         # Threat Intel API enrichment scoring
         for ip_e in iocs.get("ip_enrichment", []):
