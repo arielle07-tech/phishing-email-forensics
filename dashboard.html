@@ -403,9 +403,33 @@
   .ticket-stat .stat-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
 
   .hidden { display:none !important; }
+
+  /* Lightbox overlay */
+  #lightbox-overlay {
+    display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,.92); z-index:10000; cursor:zoom-out;
+    justify-content:center; align-items:center;
+  }
+  #lightbox-overlay.active { display:flex; }
+  #lightbox-overlay img {
+    max-width:92vw; max-height:92vh; object-fit:contain;
+    border-radius:6px; box-shadow:0 0 40px rgba(0,0,0,.6);
+  }
+  #lightbox-overlay .lightbox-close {
+    position:absolute; top:16px; right:24px; color:#fff; font-size:28px;
+    cursor:pointer; background:rgba(255,255,255,.1); border:none;
+    width:40px; height:40px; border-radius:50%; display:flex;
+    align-items:center; justify-content:center;
+  }
+  #lightbox-overlay .lightbox-close:hover { background:rgba(255,255,255,.25); }
 </style>
 </head>
 <body>
+
+<div id="lightbox-overlay" onclick="closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+  <img id="lightbox-img" src="" alt="Zoom">
+</div>
 
 <div class="header">
   <div class="header-left">
@@ -1650,9 +1674,10 @@ function renderSandbox(a) {
 
       // Screenshot
       if (hasScreenshot) {
-        html += `<div style="position:relative;border-bottom:1px solid var(--border2)">
+        html += `<div style="position:relative;border-bottom:1px solid var(--border2);cursor:zoom-in" onclick="openLightbox('data:image/png;base64,${r.screenshot_b64}')">
           <img src="data:image/png;base64,${r.screenshot_b64}" style="width:100%;height:220px;object-fit:cover;object-position:top" alt="Capture">
           <div style="position:absolute;top:6px;right:6px;padding:2px 8px;background:${indicatorColor};color:#fff;border-radius:3px;font-size:10px;font-weight:600">${indicators.length?indicators.length+' indicateur(s)':'OK'}</div>
+          <div style="position:absolute;bottom:6px;right:6px;padding:2px 8px;background:rgba(0,0,0,.6);color:#fff;border-radius:3px;font-size:10px">&#x1f50d; Cliquer pour agrandir</div>
         </div>`;
       } else {
         html += `<div style="height:80px;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--text3);border-bottom:1px solid var(--border2)">${r.error?esc(r.error):'Pas de capture'}</div>`;
@@ -2026,6 +2051,18 @@ function downloadJSON() {
 
 // ══════════ UTILS ══════════
 function esc(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function openLightbox(src) {
+  const overlay = document.getElementById('lightbox-overlay');
+  document.getElementById('lightbox-img').src = src;
+  overlay.classList.add('active');
+  document.addEventListener('keydown', closeLightboxOnEsc);
+}
+function closeLightbox() {
+  document.getElementById('lightbox-overlay').classList.remove('active');
+  document.removeEventListener('keydown', closeLightboxOnEsc);
+}
+function closeLightboxOnEsc(e) { if (e.key === 'Escape') closeLightbox(); }
 function formatBytes(bytes) { if (!bytes) return '0 B'; const k=1024,sizes=['B','KB','MB','GB']; const i=Math.floor(Math.log(bytes)/Math.log(k)); return parseFloat((bytes/Math.pow(k,i)).toFixed(1))+' '+sizes[i]; }
 
 // ══════════ DEMO DATA ══════════
