@@ -26,6 +26,9 @@ python-docx>=1.0         # Word (.docx) incident reports
 # === Threat Intel Enrichment ===
 requests>=2.31           # HTTP calls for threat intel APIs (ipapi, AbuseIPDB, VT, URLhaus)
 
+# === URL Sandboxing ===
+playwright>=1.40         # Headless Chromium for URL screenshot capture
+
 # v2.0 — Timeline forensique
 # geoip2>=4.8             # MaxMind GeoIP lookups
 

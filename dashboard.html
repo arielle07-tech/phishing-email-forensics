@@ -1147,6 +1147,7 @@ function renderAnalysis(a) {
       <div class="panel"><div class="panel-header">Pieces Jointes</div><div class="panel-body" id="attachmentsPanel"></div></div>
       <div class="panel full-width" id="threatSection"><div class="panel-header">&#x1f6a8; Analyse des Menaces — Pieces Jointes</div><div class="panel-body" id="threatPanel"></div></div>
       <div class="panel full-width" id="ipSection"><div class="panel-header">&#x1f310; Analyse des IPs</div><div class="panel-body" id="ipPanel"></div></div>
+      <div class="panel full-width" id="sandboxSection" style="display:none"><div class="panel-header">&#x1f4f7; Sandbox URLs — Captures d'ecran</div><div class="panel-body" id="sandboxPanel"></div></div>
       <div class="panel full-width"><div class="panel-header">Anomalies</div><div class="panel-body" id="anomaliesPanel"></div></div>
       <div class="panel full-width hidden" id="aiSection"><div class="panel-header">Analyse IA — Social Engineering <span class="ai-tag">AI</span></div><div class="panel-body" id="aiPanel"></div></div>
       <div class="panel hidden" id="aiRadarSection"><div class="panel-header">Radar Tactiques <span class="ai-tag">AI</span></div><div class="panel-body" id="aiRadarPanel"></div></div>
@@ -1167,6 +1168,7 @@ function renderAnalysis(a) {
   renderAttachments(a);
   renderThreatAnalysis(a);
   renderIPAnalysis(a);
+  renderSandbox(a);
   renderAnomalies(a);
 
   if (a.ai_analysis && !a.ai_analysis.error) {
@@ -1290,12 +1292,30 @@ function renderAttachments(a) {
         extra = '<div style="margin-top:6px;padding:6px 8px;background:var(--warning-dim);border-radius:4px;font-size:11px;color:var(--warning)">Extension suspecte — verifier le contenu</div>';
       }
     }
+    // Image analysis
+    const img = att.image_analysis;
+    let imgHtml = '';
+    if (img) {
+      imgHtml = '<div style="margin-top:8px;padding:8px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--info)">';
+      imgHtml += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Analyse image</div>';
+      imgHtml += `<div style="font-size:11px;color:var(--text2)">Format: ${esc(img.format||'?')} | Dimensions: ${esc(img.dimensions||'?')} | ${formatBytes(img.size_bytes)}</div>`;
+      if (img.has_exif) imgHtml += `<div style="font-size:11px;color:var(--info);margin-top:2px">EXIF present${img.exif_software?' — '+esc(img.exif_software.join(', ')):''}</div>`;
+      if ((img.suspicious_indicators||[]).length) {
+        img.suspicious_indicators.forEach(si => {
+          imgHtml += `<div style="font-size:11px;color:var(--warning);margin-top:2px">${esc(si)}</div>`;
+        });
+      }
+      if ((img.embedded_urls||[]).length) {
+        imgHtml += '<div style="font-size:11px;color:var(--danger);margin-top:2px">URLs dans image: ' + img.embedded_urls.map(u => esc(u)).join(', ') + '</div>';
+      }
+      imgHtml += '</div>';
+    }
     return `<div class="att-card">
       <div class="att-name">${esc(att.filename)} ${att.suspicious_extension?'<span class="suspicious">SUSPECT</span>':''}</div>
       <div class="att-meta">Type: ${esc(att.content_type)} | ${formatBytes(att.size_bytes)}</div>
       <div class="att-hash">MD5: ${att.md5}</div>
       <div class="att-hash">SHA256: ${att.sha256}</div>
-      ${extra}
+      ${extra}${imgHtml}
     </div>`;
   }).join('');
 }
@@ -1382,6 +1402,28 @@ function renderThreatAnalysis(a) {
     html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--danger)">
       <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Exfiltration</div>
       <div style="font-size:11px;color:var(--danger)">Mecanismes d'exfiltration detectes</div>
+    </div>`;
+  }
+
+  if (ha.has_decoded_content) {
+    html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--accent)">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Contenu decode (Base64)</div>
+      <div style="font-size:11px;color:var(--text)">${esc(ha.decoded_content_summary||'')}</div>
+      ${ha.decoded_size?'<div style="font-size:10px;color:var(--text3);margin-top:2px">Taille decodee: '+formatBytes(ha.decoded_size)+'</div>':''}
+    </div>`;
+  }
+
+  if ((ha.brand_impersonation||[]).length) {
+    html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--danger)">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">Imitation de marque</div>
+      <div style="font-size:11px;color:var(--danger)">${ha.brand_impersonation.map(b=>esc(b.charAt(0).toUpperCase()+b.slice(1))).join(', ')}</div>
+    </div>`;
+  }
+
+  if ((ha.decoded_urls||[]).length) {
+    html += `<div style="padding:10px;background:var(--bg3);border-radius:4px;border-left:3px solid var(--warning)">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:4px">URLs cachees dans le payload (${ha.decoded_urls.length})</div>
+      <div style="font-size:11px;color:var(--text);word-break:break-all">${ha.decoded_urls.slice(0,8).map(u=>esc(u)).join('<br>')}</div>
     </div>`;
   }
 
@@ -1506,6 +1548,66 @@ function renderIPAnalysis(a) {
   }
 
   document.getElementById('ipPanel').innerHTML = html;
+}
+
+function renderSandbox(a) {
+  const sb = a.url_sandbox||{};
+  const el = document.getElementById('sandboxSection');
+  const results = sb.results||[];
+  if (!results.length) { el.style.display='none'; return; }
+  el.style.display='';
+
+  let html = '';
+  if (!sb.available) {
+    html = '<div class="empty-state">Playwright non installe — sandboxing desactive. <code>pip install playwright && playwright install chromium</code></div>';
+  } else {
+    html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:16px">';
+    results.forEach(r => {
+      const hasScreenshot = r.screenshot_b64 && r.screenshot_b64.length > 100;
+      const indicators = r.phishing_indicators||[];
+      const indicatorColor = indicators.length ? 'var(--danger)' : 'var(--success)';
+
+      html += '<div style="background:var(--bg3);border-radius:6px;overflow:hidden;border:1px solid var(--border2)">';
+
+      // Screenshot
+      if (hasScreenshot) {
+        html += `<div style="position:relative;border-bottom:1px solid var(--border2)">
+          <img src="data:image/png;base64,${r.screenshot_b64}" style="width:100%;height:220px;object-fit:cover;object-position:top" alt="Capture">
+          <div style="position:absolute;top:6px;right:6px;padding:2px 8px;background:${indicatorColor};color:#fff;border-radius:3px;font-size:10px;font-weight:600">${indicators.length?indicators.length+' indicateur(s)':'OK'}</div>
+        </div>`;
+      } else {
+        html += `<div style="height:80px;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--text3);border-bottom:1px solid var(--border2)">${r.error?esc(r.error):'Pas de capture'}</div>`;
+      }
+
+      // Info
+      html += '<div style="padding:10px">';
+      html += `<div style="font-size:11px;color:var(--accent);word-break:break-all;margin-bottom:4px">${esc(r.original_url)}</div>`;
+      if (r.final_url && r.final_url !== r.original_url) {
+        html += `<div style="font-size:10px;color:var(--warning);margin-bottom:4px">Redirige vers: ${esc(r.final_url)}</div>`;
+      }
+      if (r.title) html += `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">Titre: ${esc(r.title)}</div>`;
+      html += `<div style="font-size:10px;color:var(--text3)">Status: ${r.status_code} | Temps: ${r.load_time_ms}ms | Taille: ${formatBytes(r.page_content_length)}</div>`;
+
+      // Redirects
+      if ((r.redirects||[]).length) {
+        html += `<div style="margin-top:6px;font-size:10px;color:var(--warning)">${r.redirects.length} redirection(s) HTTP</div>`;
+      }
+
+      // Phishing indicators
+      if (indicators.length) {
+        html += '<div style="margin-top:8px">';
+        indicators.forEach(ind => {
+          html += `<div style="padding:3px 6px;background:var(--danger-dim);color:var(--danger);border-radius:3px;font-size:10px;margin-bottom:3px">${esc(ind)}</div>`;
+        });
+        html += '</div>';
+      }
+
+      html += '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('sandboxPanel').innerHTML = html;
 }
 
 function renderKillChain(a) {

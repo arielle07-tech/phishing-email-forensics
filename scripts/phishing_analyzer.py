@@ -164,14 +164,39 @@ class PhishingAnalyzer:
                             pass
 
             # Also try to parse raw headers from .msg header property
+            # This is critical for extracting Received headers and IPs
+            received_count = len(em.get_all('Received') or [])
             if hasattr(msg_obj, 'header') and msg_obj.header:
                 raw_header = str(msg_obj.header)
+                # Parse Received headers using line continuation (lines starting with space/tab)
                 import re as _re
-                for m in _re.finditer(r'^(Received:\s*.+?)(?=^[A-Z]|\Z)', raw_header, _re.MULTILINE | _re.DOTALL):
+                lines = raw_header.split('\n')
+                current_header = ''
+                for line in lines:
+                    if line.startswith((' ', '\t')) and current_header:
+                        current_header += ' ' + line.strip()
+                    else:
+                        if current_header.lower().startswith('received:'):
+                            try:
+                                em.append('Received', current_header.split(':', 1)[1].strip())
+                            except Exception:
+                                pass
+                        current_header = line.strip()
+                # Don't forget the last one
+                if current_header.lower().startswith('received:'):
                     try:
-                        em.append('Received', m.group(1).replace('Received:', '').strip())
+                        em.append('Received', current_header.split(':', 1)[1].strip())
                     except Exception:
                         pass
+
+            # Also extract Return-Path if missing
+            if not em.get('Return-Path') and hasattr(msg_obj, 'header') and msg_obj.header:
+                rp_match = _re.search(r'Return-Path:\s*<?([^>\s]+)>?', str(msg_obj.header), _re.I)
+                if rp_match:
+                    em['Return-Path'] = rp_match.group(1)
+
+            new_received = len(em.get_all('Received') or [])
+            print(f"[MSG] Headers parsed: {received_count} -> {new_received} Received headers")
 
             # Set body
             body = msg_obj.body or ''
@@ -204,6 +229,7 @@ class PhishingAnalyzer:
         self._check_authentication()
         self._analyze_attachments()   # avant _extract_iocs pour merger les IOCs des PJ
         self._extract_iocs()
+        self._sandbox_urls()          # captures d'ecran des URLs suspectes
         self._calculate_risk_score()
 
         # Analyse IA si activée
@@ -416,12 +442,27 @@ class PhishingAnalyzer:
         # IPs from Received headers (relay chain)
         received_headers = self.msg.get_all("Received") if self.msg else []
         if received_headers:
+            print(f"[IOC] Found {len(received_headers)} Received headers")
             for hdr in received_headers:
                 header_ips = IP_PATTERN.findall(str(hdr))
                 for ip in header_ips:
                     if ip not in seen_ips:
                         ip_analysis.append({"ip": ip, "is_private": self._is_private_ip(ip), "source": "header"})
                         seen_ips.add(ip)
+        else:
+            print("[IOC] No Received headers found")
+
+        # Fallback: extract IPs from ALL headers if .msg (headers might be in other fields)
+        if self._is_msg and self._msg_obj and not ip_analysis:
+            print("[IOC] Fallback: scanning raw .msg headers for IPs")
+            raw = str(getattr(self._msg_obj, 'header', '')) + str(getattr(self._msg_obj, 'headerDict', ''))
+            fallback_ips = IP_PATTERN.findall(raw)
+            for ip in fallback_ips:
+                if ip not in seen_ips and not ip.startswith('0.') and not ip.startswith('255.'):
+                    ip_analysis.append({"ip": ip, "is_private": self._is_private_ip(ip), "source": "header"})
+                    seen_ips.add(ip)
+            if fallback_ips:
+                print(f"[IOC] Fallback found {len(ip_analysis)} IPs")
 
         # Merge IPs from attachment scans
         for att_ip in att_iocs.get("ips", []):
@@ -616,6 +657,11 @@ class PhishingAnalyzer:
                     # Scan HTML/HTM attachment content for IOCs
                     if filename.lower().endswith(('.html', '.htm', '.svg')):
                         self._scan_attachment_content(data, attachment_iocs)
+                    # Analyze image metadata
+                    if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff')):
+                        img_meta = self._extract_image_metadata(data, filename)
+                        if img_meta:
+                            att["image_analysis"] = img_meta
                     attachments.append(att)
         elif self.msg.is_multipart():
             for part in self.msg.walk():
@@ -635,10 +681,107 @@ class PhishingAnalyzer:
                         # Scan HTML/HTM attachment content for IOCs
                         if filename.lower().endswith(('.html', '.htm', '.svg')):
                             self._scan_attachment_content(content, attachment_iocs)
+                        # Analyze image metadata
+                        if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff')):
+                            img_meta = self._extract_image_metadata(content, filename)
+                            if img_meta:
+                                att["image_analysis"] = img_meta
                         attachments.append(att)
 
         self.report["attachments"] = attachments
         self.report["_attachment_iocs"] = attachment_iocs
+
+    def _extract_image_metadata(self, data: bytes, filename: str) -> dict:
+        """Extrait les metadonnees d'une image (dimensions, format, EXIF basique)."""
+        meta = {
+            "filename": filename,
+            "size_bytes": len(data),
+            "format": None,
+            "dimensions": None,
+            "has_exif": False,
+            "suspicious_indicators": [],
+        }
+
+        # Detect format from magic bytes
+        if data[:3] == b'\xff\xd8\xff':
+            meta["format"] = "JPEG"
+        elif data[:8] == b'\x89PNG\r\n\x1a\n':
+            meta["format"] = "PNG"
+        elif data[:6] in (b'GIF87a', b'GIF89a'):
+            meta["format"] = "GIF"
+        elif data[:2] == b'BM':
+            meta["format"] = "BMP"
+        else:
+            meta["format"] = "Unknown"
+            if b'<html' in data.lower()[:500] or b'<script' in data.lower()[:500]:
+                meta["suspicious_indicators"].append("Fichier image contenant du HTML/JavaScript — possible polyglot")
+
+        # Parse image dimensions
+        try:
+            if meta["format"] == "PNG" and len(data) > 24:
+                import struct
+                w = struct.unpack('>I', data[16:20])[0]
+                h = struct.unpack('>I', data[20:24])[0]
+                meta["dimensions"] = f"{w}x{h}"
+            elif meta["format"] == "JPEG":
+                # Simple SOF parser
+                i = 2
+                while i < len(data) - 9:
+                    if data[i] == 0xFF and data[i+1] in (0xC0, 0xC2):
+                        h = (data[i+5] << 8) + data[i+6]
+                        w = (data[i+7] << 8) + data[i+8]
+                        meta["dimensions"] = f"{w}x{h}"
+                        break
+                    elif data[i] == 0xFF:
+                        seg_len = (data[i+2] << 8) + data[i+3]
+                        i += 2 + seg_len
+                    else:
+                        i += 1
+            elif meta["format"] == "GIF" and len(data) > 10:
+                import struct
+                w = struct.unpack('<H', data[6:8])[0]
+                h = struct.unpack('<H', data[8:10])[0]
+                meta["dimensions"] = f"{w}x{h}"
+        except Exception:
+            pass
+
+        # Check for EXIF data (JPEG)
+        if meta["format"] == "JPEG" and b'Exif' in data[:100]:
+            meta["has_exif"] = True
+            # Extract basic EXIF info
+            exif_info = []
+            # Look for common EXIF strings
+            for marker in [b'Software', b'Creator', b'Author', b'Adobe', b'Photoshop',
+                          b'GIMP', b'Paint', b'Snagit', b'Screenshot']:
+                if marker in data:
+                    exif_info.append(marker.decode('ascii', errors='ignore'))
+            if exif_info:
+                meta["exif_software"] = exif_info[:3]
+
+        # Suspicious indicators
+        if meta["size_bytes"] < 500:
+            meta["suspicious_indicators"].append("Image tres petite — possible tracking pixel")
+        if meta["format"] == "JPEG" and meta["dimensions"]:
+            try:
+                w, h = map(int, meta["dimensions"].split("x"))
+                if w == 1 and h == 1:
+                    meta["suspicious_indicators"].append("Image 1x1 — tracking pixel confirme")
+                elif w > 2000 or h > 2000:
+                    meta["suspicious_indicators"].append("Image haute resolution — contenu potentiellement dissimule")
+            except Exception:
+                pass
+
+        # Check for embedded URLs in image data (steganography indicator)
+        try:
+            text_in_image = data.decode('ascii', errors='ignore')
+            urls_in_img = URL_PATTERN.findall(text_in_image[100:])  # Skip header
+            if urls_in_img:
+                meta["suspicious_indicators"].append(f"URLs detectees dans les donnees binaires ({len(urls_in_img)})")
+                meta["embedded_urls"] = urls_in_img[:5]
+        except Exception:
+            pass
+
+        return meta if (meta["format"] or meta["suspicious_indicators"]) else None
 
     def _scan_attachment_content(self, data: bytes, iocs_out: dict):
         """Analyse approfondie du contenu d'une pièce jointe HTML."""
@@ -670,6 +813,25 @@ class PhishingAnalyzer:
         for ip in ips:
             iocs_out["ips"].append({"ip": ip, "is_private": self._is_private_ip(ip), "source": "attachment"})
 
+        # ── Decode Base64 content to analyze hidden payload ──
+        decoded_text = ""
+        b64_matches = re.findall(r'[A-Za-z0-9+/=]{200,}', text)
+        decoded_segments = []
+        if b64_matches:
+            import base64
+            for b64 in b64_matches:
+                try:
+                    decoded = base64.b64decode(b64).decode('utf-8', errors='ignore')
+                    if len(decoded) > 50 and ('<' in decoded or 'http' in decoded.lower()):
+                        decoded_segments.append(decoded)
+                        decoded_text += decoded + "\n"
+                except Exception:
+                    pass
+
+        # Combine original + decoded for analysis
+        full_text = text + "\n" + decoded_text
+        full_lower = full_text.lower()
+
         # ── Deep HTML Analysis ──
         analysis = {
             "has_forms": False,
@@ -685,24 +847,76 @@ class PhishingAnalyzer:
             "obfuscation_methods": [],
             "has_data_exfil": False,
             "external_resources": [],
+            "decoded_content_summary": "",
+            "decoded_urls": [],
             "threat_type": "unknown",
-            "threat_description": ""
+            "threat_description": "",
+            "file_size": len(data),
         }
 
-        # Forms — credential harvesting detection
+        # Extract URLs from decoded content
+        if decoded_text:
+            decoded_urls = list(set(URL_PATTERN.findall(decoded_text)))
+            analysis["decoded_urls"] = decoded_urls[:20]
+            # Add decoded URLs to IOCs
+            for url in decoded_urls:
+                parsed = urlparse(url)
+                if url not in [u["url"] for u in iocs_out["urls"]]:
+                    iocs_out["urls"].append({
+                        "url": url, "domain": parsed.netloc, "scheme": parsed.scheme,
+                        "path": parsed.path,
+                        "suspicious_tld": any(parsed.netloc.endswith(tld) for tld in SUSPICIOUS_TLDS),
+                        "ip_based": bool(IP_PATTERN.match(parsed.netloc)),
+                        "url_shortener": self._is_url_shortener(parsed.netloc),
+                        "mismatched_display": False, "source": "attachment (decoded)"
+                    })
+            # Extract IPs from decoded content
+            decoded_ips = list(set(IP_PATTERN.findall(decoded_text)))
+            for ip in decoded_ips:
+                if ip not in [i["ip"] for i in iocs_out["ips"]]:
+                    iocs_out["ips"].append({"ip": ip, "is_private": self._is_private_ip(ip), "source": "attachment (decoded)"})
+
+            # Summarize decoded content
+            summary_parts = []
+            if '<form' in decoded_text.lower():
+                summary_parts.append("formulaire de connexion")
+            if 'password' in decoded_text.lower():
+                summary_parts.append("champ mot de passe")
+            if '<script' in decoded_text.lower():
+                summary_parts.append("scripts JavaScript")
+            if decoded_urls:
+                summary_parts.append(f"{len(decoded_urls)} URLs cachees")
+            if '<img' in decoded_text.lower():
+                summary_parts.append("images")
+            if '<style' in decoded_text.lower() or 'css' in decoded_text.lower():
+                summary_parts.append("styles CSS (imitation de page)")
+            # Brand impersonation detection
+            brands = ['microsoft', 'office365', 'outlook', 'onedrive', 'sharepoint',
+                       'google', 'gmail', 'apple', 'icloud', 'amazon', 'paypal',
+                       'dhl', 'fedex', 'ups', 'maersk', 'msc', 'bank', 'netflix',
+                       'facebook', 'instagram', 'linkedin', 'whatsapp', 'dropbox']
+            found_brands = [b for b in brands if b in decoded_text.lower()]
+            if found_brands:
+                summary_parts.append(f"imitation de marque: {', '.join(found_brands[:3])}")
+                analysis["brand_impersonation"] = found_brands[:5]
+            analysis["decoded_content_summary"] = "; ".join(summary_parts) if summary_parts else "Contenu HTML decode"
+            analysis["has_decoded_content"] = True
+            analysis["decoded_size"] = len(decoded_text)
+
+        # Forms — credential harvesting detection (search in full text including decoded)
         form_pattern = re.compile(r'<form[^>]*action=["\']([^"\']*)["\'][^>]*>', re.I)
-        forms = form_pattern.findall(text)
-        if forms or '<form' in lower_text:
+        forms = form_pattern.findall(full_text)
+        if forms or '<form' in full_lower:
             analysis["has_forms"] = True
             analysis["form_targets"] = [f for f in forms if f]
 
         # Password fields — confirms credential harvesting
-        if re.search(r'type=["\']password["\']', lower_text) or 'input.*password' in lower_text:
+        if re.search(r'type=["\']password["\']', full_lower) or re.search(r'type\s*=\s*["\']password', full_lower):
             analysis["has_password_field"] = True
 
         # Email/login fields
-        has_email_field = bool(re.search(r'type=["\']email["\']', lower_text))
-        has_login_keywords = any(kw in lower_text for kw in ['login', 'sign in', 'log in', 'connexion', 'mot de passe', 'identifiant', 'username'])
+        has_email_field = bool(re.search(r'type=["\']email["\']', full_lower))
+        has_login_keywords = any(kw in full_lower for kw in ['login', 'sign in', 'log in', 'connexion', 'mot de passe', 'identifiant', 'username', 'verify your', 'confirm your', 'update your'])
 
         # Scripts and obfuscation
         script_indicators = {
@@ -723,7 +937,7 @@ class PhishingAnalyzer:
         }
         detected_scripts = []
         for indicator, desc in script_indicators.items():
-            if indicator in lower_text:
+            if indicator in full_lower:
                 detected_scripts.append(desc)
         if detected_scripts:
             analysis["has_scripts"] = True
@@ -741,47 +955,51 @@ class PhishingAnalyzer:
             obf_methods.append("Array join obfuscation")
         if 'atob(' in lower_text:
             obf_methods.append("Base64 encoded payload")
-        # Long encoded strings (common in phishing HTML)
-        if re.search(r'[A-Za-z0-9+/=]{200,}', text):
-            obf_methods.append("Long Base64/encoded string detected")
+        if b64_matches:
+            total_b64 = sum(len(m) for m in b64_matches)
+            obf_methods.append(f"Contenu encode en Base64 ({total_b64:,} caracteres, {len(b64_matches)} bloc(s))")
+            if decoded_segments:
+                obf_methods.append(f"Decode avec succes : {len(decoded_segments)} segment(s) contenant du HTML")
         if obf_methods:
             analysis["has_obfuscation"] = True
             analysis["obfuscation_methods"] = obf_methods
 
-        # Redirects
-        meta_refresh = re.findall(r'<meta[^>]*http-equiv=["\']refresh["\'][^>]*content=["\'][^"\']*url=([^"\';\s]+)', text, re.I)
-        js_redirects = re.findall(r'(?:window|document)\.location(?:\.href)?\s*=\s*["\']([^"\']+)', text, re.I)
+        # Redirects (in full text)
+        meta_refresh = re.findall(r'<meta[^>]*http-equiv=["\']refresh["\'][^>]*content=["\'][^"\']*url=([^"\';\s]+)', full_text, re.I)
+        js_redirects = re.findall(r'(?:window|document)\.location(?:\.href)?\s*=\s*["\']([^"\']+)', full_text, re.I)
         all_redirects = meta_refresh + js_redirects
         if all_redirects:
             analysis["has_redirects"] = True
             analysis["redirect_targets"] = all_redirects[:5]
 
-        # Iframes
-        iframe_srcs = re.findall(r'<iframe[^>]*src=["\']([^"\']+)["\']', text, re.I)
-        if iframe_srcs or '<iframe' in lower_text:
+        # Iframes (in full text)
+        iframe_srcs = re.findall(r'<iframe[^>]*src=["\']([^"\']+)["\']', full_text, re.I)
+        if iframe_srcs or '<iframe' in full_lower:
             analysis["has_iframes"] = True
             analysis["iframe_sources"] = iframe_srcs[:5]
 
-        # External resources (images, scripts loaded from outside)
-        ext_resources = re.findall(r'(?:src|href)=["\']((https?://)[^"\']+)["\']', text, re.I)
-        analysis["external_resources"] = list(set(r[0] for r in ext_resources))[:10]
+        # External resources (from full text)
+        ext_resources = re.findall(r'(?:src|href)=["\']((https?://)[^"\']+)["\']', full_text, re.I)
+        analysis["external_resources"] = list(set(r[0] for r in ext_resources))[:15]
 
         # Data exfiltration indicators
-        if any(kw in lower_text for kw in ['sendbeacon', 'xmlhttprequest', 'fetch(', '.send(']):
+        if any(kw in full_lower for kw in ['sendbeacon', 'xmlhttprequest', 'fetch(', '.send(']):
             analysis["has_data_exfil"] = True
 
         # ── Determine threat type and build narrative ──
-        if analysis["has_password_field"] or (analysis["has_forms"] and has_email_field):
+        if analysis["has_password_field"] or (analysis["has_forms"] and (has_email_field or has_login_keywords)):
             analysis["threat_type"] = "credential_harvesting"
             targets = ', '.join(analysis['form_targets'][:3]) if analysis['form_targets'] else 'inconnu'
             analysis["threat_description"] = (
                 f"Credential harvesting — cette pièce jointe HTML contient un formulaire de connexion "
                 f"avec champ mot de passe. Les identifiants saisis sont envoyés vers : {targets}. "
             )
+            if analysis.get("brand_impersonation"):
+                analysis["threat_description"] += f"Imitation de marque detectee : {', '.join(analysis['brand_impersonation'][:3])}. "
             if analysis["has_obfuscation"]:
-                analysis["threat_description"] += f"Le code est obfusqué ({', '.join(analysis['obfuscation_methods'][:3])}). "
+                analysis["threat_description"] += f"Le code est obfusqué ({', '.join(analysis['obfuscation_methods'][:2])}). "
             if analysis["has_scripts"]:
-                analysis["threat_description"] += f"Techniques JS detectees : {', '.join(analysis['script_techniques'][:3])}."
+                analysis["threat_description"] += f"Techniques JS : {', '.join(analysis['script_techniques'][:3])}."
 
         elif analysis["has_redirects"]:
             targets = ', '.join(analysis['redirect_targets'][:2])
@@ -790,15 +1008,38 @@ class PhishingAnalyzer:
                 f"Redirection malveillante — ce fichier HTML redirige automatiquement vers : {targets}. "
                 f"L'utilisateur est amené sur un site externe contrôlé par l'attaquant."
             )
+            if analysis.get("brand_impersonation"):
+                analysis["threat_description"] += f" Imitation de marque : {', '.join(analysis['brand_impersonation'][:3])}."
 
         elif analysis["has_scripts"] and analysis["has_obfuscation"]:
             analysis["threat_type"] = "obfuscated_payload"
-            analysis["threat_description"] = (
-                f"Payload obfusqué — ce fichier HTML contient du JavaScript obfusqué "
+            desc = (
+                f"Payload obfusqué — ce fichier HTML ({analysis['file_size']:,} octets) contient du code obfusqué "
                 f"({', '.join(analysis['obfuscation_methods'][:3])}). "
-                f"Techniques : {', '.join(analysis['script_techniques'][:3])}. "
-                f"Objectif probable : execution de code malveillant ou redirection."
             )
+            if analysis["script_techniques"]:
+                desc += f"Techniques : {', '.join(analysis['script_techniques'][:3])}. "
+            if analysis.get("decoded_content_summary"):
+                desc += f"Contenu decode : {analysis['decoded_content_summary']}. "
+            if analysis.get("brand_impersonation"):
+                desc += f"Imitation de marque : {', '.join(analysis['brand_impersonation'][:3])}. "
+            desc += "Objectif probable : credential harvesting ou redirection vers site malveillant."
+            analysis["threat_description"] = desc
+
+        elif analysis["has_obfuscation"] and decoded_segments:
+            analysis["threat_type"] = "obfuscated_payload"
+            desc = (
+                f"Payload obfusqué — ce fichier HTML ({analysis['file_size']:,} octets) contient du contenu "
+                f"masqué en Base64. "
+            )
+            if analysis.get("decoded_content_summary"):
+                desc += f"Apres decodage : {analysis['decoded_content_summary']}. "
+            if analysis.get("decoded_urls"):
+                desc += f"{len(analysis['decoded_urls'])} URL(s) cachee(s) dans le payload. "
+            if analysis.get("brand_impersonation"):
+                desc += f"Imitation de marque : {', '.join(analysis['brand_impersonation'][:3])}. "
+            desc += "Technique classique de phishing pour contourner les filtres email."
+            analysis["threat_description"] = desc
 
         elif analysis["has_forms"]:
             analysis["threat_type"] = "data_collection"
@@ -814,12 +1055,53 @@ class PhishingAnalyzer:
                 f"{', '.join(analysis['iframe_sources'][:2]) or 'source masquée'}."
             )
 
+        elif analysis["has_obfuscation"]:
+            analysis["threat_type"] = "suspicious_html"
+            desc = (
+                f"Fichier HTML suspect ({analysis['file_size']:,} octets) contenant du contenu obfusqué "
+                f"({', '.join(analysis['obfuscation_methods'][:3])}). "
+            )
+            if analysis.get("decoded_content_summary"):
+                desc += f"Contenu decode : {analysis['decoded_content_summary']}. "
+            desc += "Vecteur courant de phishing — analyse manuelle recommandée."
+            analysis["threat_description"] = desc
+
         else:
             analysis["threat_type"] = "suspicious_html"
-            analysis["threat_description"] = "Fichier HTML en pièce jointe — vecteur courant de phishing."
+            analysis["threat_description"] = f"Fichier HTML en pièce jointe ({analysis['file_size']:,} octets) — vecteur courant de phishing."
 
         iocs_out["scripts_detected"] = analysis["has_scripts"]
         iocs_out["html_analysis"] = analysis
+
+    # ── URL Sandboxing ──
+
+    def _sandbox_urls(self):
+        """Capture d'ecran des URLs suspectes via navigateur headless."""
+        try:
+            from scripts.url_sandbox import sandbox_urls, is_available
+        except ImportError:
+            try:
+                from url_sandbox import sandbox_urls, is_available
+            except ImportError:
+                return
+
+        if not is_available():
+            self.report["url_sandbox"] = {"available": False, "results": []}
+            return
+
+        urls = self.report.get("iocs", {}).get("urls", [])
+        if not urls:
+            self.report["url_sandbox"] = {"available": True, "results": []}
+            return
+
+        print(f"[SANDBOX] Lancement du sandboxing pour {len(urls)} URL(s)...")
+        results = sandbox_urls(urls, max_urls=5)
+        self.report["url_sandbox"] = {
+            "available": True,
+            "results": results,
+            "total_captured": len([r for r in results if r.get("screenshot_b64")]),
+        }
+        print(f"[SANDBOX] {len(results)} URL(s) capturee(s)")
 
     # ── Scoring de risque ──
 

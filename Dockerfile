@@ -22,6 +22,9 @@ RUN apt-get update && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Playwright — install Chromium browser for URL sandboxing
+RUN playwright install --with-deps chromium
+
 # Copy project source
 COPY scripts/ ./scripts/
 COPY dashboard.html .
