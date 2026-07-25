@@ -187,8 +187,8 @@ class PhishingAnalyzer:
         self._extract_metadata()
         self._analyze_headers()
         self._check_authentication()
+        self._analyze_attachments()   # avant _extract_iocs pour merger les IOCs des PJ
         self._extract_iocs()
-        self._analyze_attachments()
         self._calculate_risk_score()
 
         # Analyse IA si activée
@@ -345,14 +345,15 @@ class PhishingAnalyzer:
     # ── Extraction IOCs ──
 
     def _extract_iocs(self):
-        """Extrait tous les indicateurs de compromission."""
+        """Extrait tous les indicateurs de compromission (body + headers + pièces jointes)."""
         body_text = self._get_body_text()
         body_html = self._get_body_html()
         full_content = body_text + " " + body_html
 
-        # URLs
+        # URLs from body
         urls = list(set(URL_PATTERN.findall(full_content)))
         url_analysis = []
+        seen_urls = set()
         for url in urls:
             parsed = urlparse(url)
             url_info = {
@@ -363,9 +364,11 @@ class PhishingAnalyzer:
                 "suspicious_tld": any(parsed.netloc.endswith(tld) for tld in SUSPICIOUS_TLDS),
                 "ip_based": bool(IP_PATTERN.match(parsed.netloc)),
                 "url_shortener": self._is_url_shortener(parsed.netloc),
-                "mismatched_display": False  # Set during HTML analysis
+                "mismatched_display": False,
+                "source": "body"
             }
             url_analysis.append(url_info)
+            seen_urls.add(url)
 
         # Vérifier les liens masqués (href ≠ texte affiché)
         if body_html:
@@ -380,19 +383,39 @@ class PhishingAnalyzer:
                                     ua["mismatched_display"] = True
                                     ua["display_text"] = display_text.strip()
 
-        # IPs
+        # Merge URLs from attachment scans
+        att_iocs = self.report.get("_attachment_iocs", {})
+        for att_url in att_iocs.get("urls", []):
+            if att_url["url"] not in seen_urls:
+                url_analysis.append(att_url)
+                seen_urls.add(att_url["url"])
+
+        # IPs from body
         ips = list(set(IP_PATTERN.findall(full_content)))
-        # Filtrer les IPs privées pour les noter
         ip_analysis = []
+        seen_ips = set()
         for ip in ips:
-            ip_analysis.append({
-                "ip": ip,
-                "is_private": self._is_private_ip(ip)
-            })
+            ip_analysis.append({"ip": ip, "is_private": self._is_private_ip(ip), "source": "body"})
+            seen_ips.add(ip)
+
+        # IPs from Received headers (relay chain)
+        received_headers = self.msg.get_all("Received") if self.msg else []
+        if received_headers:
+            for hdr in received_headers:
+                header_ips = IP_PATTERN.findall(str(hdr))
+                for ip in header_ips:
+                    if ip not in seen_ips:
+                        ip_analysis.append({"ip": ip, "is_private": self._is_private_ip(ip), "source": "header"})
+                        seen_ips.add(ip)
+
+        # Merge IPs from attachment scans
+        for att_ip in att_iocs.get("ips", []):
+            if att_ip["ip"] not in seen_ips:
+                ip_analysis.append(att_ip)
+                seen_ips.add(att_ip["ip"])
 
         # Domaines (extraits des URLs + du contenu)
         domains = list(set(DOMAIN_PATTERN.findall(full_content)))
-        # Filtrer les domaines courants/bruit
         domains = [d for d in domains if len(d) > 4 and "." in d]
 
         self.report["iocs"] = {
@@ -400,15 +423,18 @@ class PhishingAnalyzer:
             "urls_count": len(url_analysis),
             "ips": ip_analysis,
             "ips_count": len(ip_analysis),
-            "domains": domains[:50],  # Limiter
+            "ip_addresses": ip_analysis,  # alias for dashboard compatibility
+            "domains": domains[:50],
             "domains_count": len(domains),
             "suspicious_urls_count": sum(
                 1 for u in url_analysis
                 if u["suspicious_tld"] or u["ip_based"] or u["url_shortener"] or u["mismatched_display"]
-            )
+            ),
+            "attachment_scripts_detected": att_iocs.get("scripts_detected", False),
+            "attachment_urls_count": len(att_iocs.get("urls", []))
         }
 
-        # Analyse des mots-clés phishing
+        # Analyse des mots-clés phishing (body + attachment content)
         keywords_found = []
         lower_content = full_content.lower()
         for kw in PHISHING_KEYWORDS:
@@ -421,8 +447,9 @@ class PhishingAnalyzer:
     # ── Pièces jointes ──
 
     def _analyze_attachments(self):
-        """Analyse les pièces jointes (.eml et .msg)."""
+        """Analyse les pièces jointes (.eml et .msg), y compris scan du contenu HTML."""
         attachments = []
+        attachment_iocs = {"urls": [], "ips": [], "scripts_detected": False}
 
         # .msg files: use extract-msg attachment objects directly
         if self._is_msg and self._msg_obj:
@@ -440,6 +467,9 @@ class PhishingAnalyzer:
                         "sha256": hashlib.sha256(data).hexdigest(),
                         "suspicious_extension": self._is_suspicious_extension(filename)
                     }
+                    # Scan HTML/HTM attachment content for IOCs
+                    if filename.lower().endswith(('.html', '.htm', '.svg')):
+                        self._scan_attachment_content(data, attachment_iocs)
                     attachments.append(att)
         elif self.msg.is_multipart():
             for part in self.msg.walk():
@@ -456,9 +486,48 @@ class PhishingAnalyzer:
                             "sha256": hashlib.sha256(content).hexdigest(),
                             "suspicious_extension": self._is_suspicious_extension(filename)
                         }
+                        # Scan HTML/HTM attachment content for IOCs
+                        if filename.lower().endswith(('.html', '.htm', '.svg')):
+                            self._scan_attachment_content(content, attachment_iocs)
                         attachments.append(att)
 
         self.report["attachments"] = attachments
+        self.report["_attachment_iocs"] = attachment_iocs
+
+    def _scan_attachment_content(self, data: bytes, iocs_out: dict):
+        """Scanne le contenu d'une pièce jointe HTML pour extraire URLs, IPs, scripts."""
+        try:
+            text = data.decode('utf-8', errors='ignore')
+        except Exception:
+            return
+
+        # Extract URLs from attachment
+        urls = list(set(URL_PATTERN.findall(text)))
+        for url in urls:
+            parsed = urlparse(url)
+            iocs_out["urls"].append({
+                "url": url,
+                "domain": parsed.netloc,
+                "scheme": parsed.scheme,
+                "path": parsed.path,
+                "suspicious_tld": any(parsed.netloc.endswith(tld) for tld in SUSPICIOUS_TLDS),
+                "ip_based": bool(IP_PATTERN.match(parsed.netloc)),
+                "url_shortener": self._is_url_shortener(parsed.netloc),
+                "mismatched_display": False,
+                "source": "attachment"
+            })
+
+        # Extract IPs from attachment
+        ips = list(set(IP_PATTERN.findall(text)))
+        for ip in ips:
+            iocs_out["ips"].append({"ip": ip, "is_private": self._is_private_ip(ip), "source": "attachment"})
+
+        # Detect obfuscated scripts (common in phishing HTML attachments)
+        script_indicators = ['<script', 'eval(', 'document.write(', 'atob(', 'fromCharCode',
+                             'unescape(', 'String.fromCharCode', 'window.location', 'document.location']
+        lower_text = text.lower()
+        if any(ind.lower() in lower_text for ind in script_indicators):
+            iocs_out["scripts_detected"] = True
 
     # ── Scoring de risque ──
 
@@ -527,6 +596,18 @@ class PhishingAnalyzer:
             att_score = min(suspicious_att * 10, 15)
             score += att_score
             factors.append(f"{suspicious_att} pièce(s) jointe(s) suspecte(s) (+{att_score})")
+
+        # Scripts detected in HTML attachments (+15)
+        if iocs.get("attachment_scripts_detected"):
+            score += 15
+            factors.append("Scripts detectes dans PJ HTML (+15)")
+
+        # URLs found in attachments (+10)
+        att_urls = iocs.get("attachment_urls_count", 0)
+        if att_urls > 0:
+            att_url_score = min(att_urls * 5, 10)
+            score += att_url_score
+            factors.append(f"{att_urls} URL(s) dans pièce(s) jointe(s) (+{att_url_score})")
 
         # Cap at 100
         score = min(score, 100)
@@ -671,7 +752,8 @@ class PhishingAnalyzer:
             ".exe", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js",
             ".wsf", ".msi", ".dll", ".com", ".pif", ".hta", ".cpl",
             ".jar", ".iso", ".img", ".lnk", ".docm", ".xlsm",
-            ".pptm", ".dotm", ".xltm", ".ppam", ".sldm"
+            ".pptm", ".dotm", ".xltm", ".ppam", ".sldm",
+            ".html", ".htm", ".svg", ".xll", ".iqy"
         ]
         name_lower = filename.lower()
         return any(name_lower.endswith(ext) for ext in suspicious)
