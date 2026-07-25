@@ -979,7 +979,7 @@ def generate_docx_report(analysis: dict) -> bytes:
     sev_t = doc.add_table(rows=1, cols=1)
     sev_t.alignment = WD_TABLE_ALIGNMENT.CENTER
     sc = sev_t.rows[0].cells[0]
-    color_hex = f"{level_color.red:02x}{level_color.green:02x}{level_color.blue:02x}"
+    color_hex = str(level_color)  # RGBColor.__str__ returns "RRGGBB"
     _set_cell_bg(sc, color_hex)
     sc.height = Cm(1.5)
     p = sc.paragraphs[0]
