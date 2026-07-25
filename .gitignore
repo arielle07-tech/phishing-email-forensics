@@ -35,3 +35,4 @@ Analyse Mail Test/
 *.msg
 *.eml
 *.zip
+phishing_pot/ 
