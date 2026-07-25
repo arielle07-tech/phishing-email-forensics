@@ -320,6 +320,11 @@ class PhishingAnalyzer:
         if from_domain.lower() in FREE_EMAIL_PROVIDERS:
             anomalies.append(f"Expéditeur utilise un fournisseur email gratuit: {from_domain}")
 
+        # Vérifier si Reply-To utilise un fournisseur gratuit alors que From est corporate
+        reply_to_domain = reply_to.split("@")[-1].lower() if reply_to and "@" in reply_to else ""
+        if reply_to_domain in FREE_EMAIL_PROVIDERS and from_domain.lower() not in FREE_EMAIL_PROVIDERS:
+            anomalies.append(f"Reply-To utilise un email gratuit ({reply_to}) alors que From est corporate ({from_domain})")
+
         headers["anomalies"] = anomalies
 
         # X-Headers intéressants
@@ -358,7 +363,7 @@ class PhishingAnalyzer:
                 auth["dkim"]["details"] = auth_results
 
             # DMARC
-            dmarc_match = re.search(r'dmarc=(pass|fail|none|bestguesspass)', auth_results, re.I)
+            dmarc_match = re.search(r'dmarc=(pass|fail|none|bestguesspass|permerror|temperror)', auth_results, re.I)
             if dmarc_match:
                 auth["dmarc"]["status"] = dmarc_match.group(1).lower()
                 auth["dmarc"]["details"] = auth_results
@@ -1819,11 +1824,14 @@ class PhishingAnalyzer:
         score = 0
         factors = []
 
-        # Authentication failures (+20 max)
+        # Authentication failures (+30 max)
         auth = self.report["authentication"]
         if auth["spf"]["status"] in ("fail", "softfail"):
             score += 15
-            factors.append("SPF fail/softfail (+15)")
+            factors.append(f"SPF {auth['spf']['status']} (+15)")
+        elif auth["spf"]["status"] in ("none", "permerror", "temperror"):
+            score += 10
+            factors.append(f"SPF {auth['spf']['status']} — expéditeur non vérifié (+10)")
         elif auth["spf"]["status"] == "absent":
             score += 5
             factors.append("SPF absent (+5)")
@@ -1831,6 +1839,9 @@ class PhishingAnalyzer:
         if auth["dkim"]["status"] == "fail":
             score += 15
             factors.append("DKIM fail (+15)")
+        elif auth["dkim"]["status"] in ("none", "permerror", "temperror"):
+            score += 10
+            factors.append(f"DKIM {auth['dkim']['status']} — message non signé (+10)")
         elif auth["dkim"]["status"] == "absent":
             score += 5
             factors.append("DKIM absent (+5)")
@@ -1838,6 +1849,9 @@ class PhishingAnalyzer:
         if auth["dmarc"]["status"] == "fail":
             score += 10
             factors.append("DMARC fail (+10)")
+        elif auth["dmarc"]["status"] in ("permerror", "temperror", "none"):
+            score += 8
+            factors.append(f"DMARC {auth['dmarc']['status']} — politique non appliquée (+8)")
 
         # Header anomalies (+15 max)
         anomalies = self.report["headers_analysis"].get("anomalies", [])
@@ -1933,6 +1947,96 @@ class PhishingAnalyzer:
         elif html_analysis.get("has_forms"):
             score += 10
             factors.append("Formulaire dans PJ HTML (+10)")
+
+        # ── Body HTML analysis (emails without HTML attachment) ──
+        # If no HTML attachment analysis, analyze the body HTML directly
+        if not html_analysis:
+            body_html = self._get_body_html()
+            if body_html:
+                body_lower = body_html.lower()
+                body_analysis = {}
+
+                # Brand impersonation in body
+                brands_map = {
+                    'microsoft': 'Microsoft', 'office365': 'Office365', 'outlook': 'Outlook',
+                    'onedrive': 'OneDrive', 'sharepoint': 'SharePoint', 'google': 'Google',
+                    'gmail': 'Gmail', 'apple': 'Apple', 'icloud': 'iCloud', 'amazon': 'Amazon',
+                    'paypal': 'PayPal', 'dhl': 'DHL', 'fedex': 'FedEx', 'ups': 'UPS',
+                    'maersk': 'Maersk', 'msc': 'MSC', 'netflix': 'Netflix',
+                    'facebook': 'Facebook', 'instagram': 'Instagram', 'linkedin': 'LinkedIn',
+                    'whatsapp': 'WhatsApp', 'dropbox': 'Dropbox', 'docusign': 'DocuSign',
+                    'adobe': 'Adobe', 'wells fargo': 'Wells Fargo', 'chase': 'Chase',
+                    'bank of america': 'Bank of America', 'citi': 'Citi',
+                }
+                # Also check Subject for brand impersonation
+                subject = str(self.report.get("metadata", {}).get("subject", "")).lower()
+                from_name = str(self.report.get("metadata", {}).get("from", "")).lower()
+                check_text = body_lower + " " + subject + " " + from_name
+                found_brands = [display for key, display in brands_map.items() if key in check_text]
+                if found_brands:
+                    score += 15
+                    factors.append(f"Imitation de marque (body/subject): {', '.join(found_brands[:3])} (+15)")
+                    body_analysis["brand_impersonation"] = found_brands[:5]
+
+                # Password field in body
+                if re.search(r'type=["\']password["\']', body_lower):
+                    score += 20
+                    factors.append("Champ mot de passe dans le body HTML (+20)")
+
+                # Forms in body
+                elif '<form' in body_lower:
+                    score += 10
+                    factors.append("Formulaire dans le body HTML (+10)")
+
+                # Obfuscation in body (large Base64 blobs, hex encoding)
+                b64_in_body = re.findall(r'[A-Za-z0-9+/=]{200,}', body_html)
+                if b64_in_body:
+                    score += 15
+                    factors.append(f"Contenu obfusqué Base64 dans le body ({len(b64_in_body)} bloc(s)) (+15)")
+                elif body_lower.count('\\x') > 10 or body_lower.count('\\u') > 10:
+                    score += 10
+                    factors.append("Obfuscation hex/unicode dans le body (+10)")
+
+                # Scripts in body
+                script_keywords = ['eval(', 'document.write(', 'atob(', 'fromcharcode', 'unescape(']
+                if any(kw in body_lower for kw in script_keywords):
+                    score += 10
+                    factors.append("Scripts suspects dans le body HTML (+10)")
+
+                self.report["iocs"]["body_html_analysis"] = body_analysis
+
+        # ── Suspicious From domain (brand camouflage) ──
+        from_addr = self.report.get("headers_analysis", {}).get("from_address", "")
+        from_domain = from_addr.split("@")[-1].lower() if from_addr and "@" in from_addr else ""
+        if from_domain and from_domain not in FREE_EMAIL_PROVIDERS:
+            # Check if domain mimics a well-known brand
+            brand_keywords = ['microsoft', 'google', 'apple', 'amazon', 'paypal', 'dhl',
+                              'fedex', 'netflix', 'facebook', 'instagram', 'linkedin',
+                              'outlook', 'office', 'security', 'account', 'verify',
+                              'support', 'service', 'admin', 'help', 'login', 'secure',
+                              'update', 'alert', 'notification', 'info', 'access']
+            domain_no_tld = from_domain.split('.')[0] if '.' in from_domain else from_domain
+            matching_brand_kw = [kw for kw in brand_keywords if kw in domain_no_tld]
+            if matching_brand_kw and from_domain not in ['microsoft.com', 'google.com', 'apple.com',
+                'amazon.com', 'paypal.com', 'dhl.com', 'fedex.com', 'netflix.com', 'facebook.com',
+                'instagram.com', 'linkedin.com', 'outlook.com', 'office.com', 'office365.com']:
+                score += 10
+                factors.append(f"Domaine expéditeur suspect: {from_domain} (contient: {', '.join(matching_brand_kw[:3])}) (+10)")
+
+        # ── Reply-To free email with corporate From ──
+        reply_to = self.report.get("headers_analysis", {}).get("reply_to_address", "")
+        if reply_to and from_addr:
+            reply_domain = reply_to.split("@")[-1].lower() if "@" in reply_to else ""
+            if reply_domain in FREE_EMAIL_PROVIDERS and from_domain not in FREE_EMAIL_PROVIDERS:
+                score += 10
+                factors.append(f"Reply-To email gratuit ({reply_domain}) alors que From est corporate ({from_domain}) (+10)")
+
+        # ── Priority/Importance header abuse ──
+        importance = str(self.msg.get("Importance", "")).lower() if self.msg else ""
+        x_priority = str(self.msg.get("X-Priority", "")) if self.msg else ""
+        if importance == "high" or x_priority in ("1", "2"):
+            score += 5
+            factors.append(f"Email marqué haute priorité (Importance: {importance or 'high'}, X-Priority: {x_priority or 'N/A'}) (+5)")
 
         # Threat Intel API enrichment scoring
         for ip_e in iocs.get("ip_enrichment", []):
@@ -2076,6 +2180,15 @@ class PhishingAnalyzer:
                             return payload.decode(charset, errors='replace')
                         except (LookupError, UnicodeDecodeError):
                             return payload.decode('utf-8', errors='replace')
+        elif self.msg.get_content_type() == "text/html":
+            # Non-multipart HTML email (body IS the HTML)
+            payload = self.msg.get_payload(decode=True)
+            if payload:
+                charset = self.msg.get_content_charset() or 'utf-8'
+                try:
+                    return payload.decode(charset, errors='replace')
+                except (LookupError, UnicodeDecodeError):
+                    return payload.decode('utf-8', errors='replace')
         return ""
 
     def _is_url_shortener(self, domain: str) -> bool:

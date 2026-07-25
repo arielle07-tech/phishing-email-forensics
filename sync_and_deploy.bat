@@ -24,7 +24,7 @@ echo.
 echo [3/4] Git commit + push...
 cd /d D:\PhishingMail
 git add -A
-git commit -m "feat: impact analysis — victim scenario timeline, MITRE ATT&CK mapping, business impact, response actions + URL sandboxing"
+git commit -m "feat: deep scoring overhaul — body HTML analysis, brand impersonation, SPF/DKIM none handling, DMARC permerror, suspicious domain detection, priority header scoring"
 git push
 
 echo.
