@@ -894,7 +894,7 @@ function updateOverview() {
   renderAlerts();
   renderTopIocs();
   renderTopMitre();
-  renderTimeline();
+  renderOverviewTimeline();
   renderTicketStatus();
 }
 
@@ -1041,8 +1041,8 @@ function renderTopMitre() {
   }).join('');
 }
 
-// ══════════ TIMELINE DES ANALYSES ══════════
-function renderTimeline() {
+// ══════════ TIMELINE DES ANALYSES (overview) ══════════
+function renderOverviewTimeline() {
   const h = analysisHistory;
   if (!h.length) { document.getElementById('timelinePanel').innerHTML = '<div class="empty-state">Aucune analyse</div>'; return; }
 
