@@ -2335,16 +2335,92 @@ function createTicketFromAnalysis(analysisData, historyId) {
   const impact = analysisData.impact_analysis || {};
   const ai = analysisData.ai_analysis || {};
 
-  // ── Build rich description ──
-  let desc = `Email suspect detecte.\n`;
-  desc += `Expediteur: ${meta.from || 'N/A'}\n`;
-  desc += `Sujet: ${meta.subject || 'N/A'}\n`;
-  desc += `Score: ${verdict.score || 0}/100 (${level})\n`;
-  desc += `Date: ${meta.date || 'N/A'}\n`;
-  if (impact.attack_classification) desc += `Classification: ${impact.attack_classification}\n`;
-  if ((iocs.urls || []).length) desc += `URLs suspectes: ${iocs.urls.length}\n`;
-  if ((iocs.phishing_keywords || []).length) desc += `Mots-cles phishing: ${iocs.phishing_keywords.join(', ')}\n`;
-  if (verdict.summary) desc += `\nVerdict: ${verdict.summary}`;
+  // ── Build plain-language description ──
+  const sender = (meta.from || 'un expediteur inconnu').replace(/<[^>]+>/g, '').trim();
+  const subject = meta.subject || 'sans objet';
+  const score = verdict.score || 0;
+  const urlCount = (iocs.urls || []).length;
+  const attClass = impact.attack_classification;
+  const typeStr = attClass ? (attClass.type || attClass || '') : '';
+  const typeLower = typeStr.toLowerCase();
+  const steps = (impact.victim_scenario || []);
+  const hasAttachments = (analysisData.attachments || []).some(a => a.suspicious_extension);
+
+  let desc = '';
+
+  // ── Gather concrete IOC details for the description ──
+  const urls = iocs.urls || [];
+  const suspiciousUrls = urls.filter(u => u.suspicious_tld || u.ip_based || u.url_shortener || u.mismatched_display);
+  const suspAtts = (analysisData.attachments || []).filter(a => a.suspicious_extension);
+  const kws = (iocs.phishing_keywords || []).slice(0, 3);
+  const objective = attClass ? (attClass.objective || '') : '';
+  const vector = attClass ? (attClass.vector || '') : '';
+  const impEntity = (ai.impersonation || {}).impersonated_entity || '';
+
+  // Build URL detail string
+  let urlDetail = '';
+  if (suspiciousUrls.length) {
+    const u = suspiciousUrls[0];
+    const domain = u.domain || '';
+    const flags = [];
+    if (u.suspicious_tld) flags.push('domaine suspect');
+    if (u.ip_based) flags.push('adresse IP directe');
+    if (u.url_shortener) flags.push('lien raccourci');
+    if (u.mismatched_display) flags.push('lien masque');
+    urlDetail = domain ? `Le lien pointe vers "${domain}"` : '';
+    if (flags.length) urlDetail += urlDetail ? ` (${flags.join(', ')})` : flags.join(', ');
+  } else if (urls.length) {
+    urlDetail = urls[0].domain ? `Le lien pointe vers "${urls[0].domain}"` : '';
+  }
+
+  // Build attachment detail string
+  let attDetail = '';
+  if (suspAtts.length) {
+    const a = suspAtts[0];
+    const ext = (a.filename || '').split('.').pop().toLowerCase();
+    const dangerousExts = { 'exe': 'un programme executable', 'bat': 'un script batch', 'cmd': 'un script de commandes',
+      'js': 'un script JavaScript', 'vbs': 'un script Visual Basic', 'ps1': 'un script PowerShell',
+      'html': 'une page web embarquee', 'htm': 'une page web embarquee', 'iso': 'une image disque',
+      'zip': 'une archive compressée', 'rar': 'une archive compressée', 'docm': 'un document Word avec macros',
+      'xlsm': 'un classeur Excel avec macros', 'pdf': 'un document PDF', 'scr': 'un ecran de veille executable' };
+    const extDesc = dangerousExts[ext] || `un fichier .${ext}`;
+    attDetail = `La piece jointe "${a.filename}" est ${extDesc}`;
+    if (ext === 'html' || ext === 'htm') attDetail += ' qui peut contenir un faux formulaire de connexion';
+    else if (['exe','bat','cmd','scr'].includes(ext)) attDetail += ' qui peut installer un malware sur le poste';
+    else if (['js','vbs','ps1'].includes(ext)) attDetail += ' capable d\'executer du code malveillant';
+    else if (['docm','xlsm'].includes(ext)) attDetail += ' dont les macros peuvent telecharger un malware';
+    attDetail += '.';
+  }
+
+  // ── Explain concretely what would have happened — ticket style ──
+  if (typeLower.includes('credential') || typeLower.includes('identifiant')) {
+    desc = `Quelqu'un se fait passer pour ${sender} et en cliquant sur le lien malveillant, il redirige vers une fausse page qui ressemble a un site officiel et demande de saisir un mot de passe.`;
+    if (urlDetail) desc += `\n${urlDetail}.`;
+    if (attDetail) desc += `\n${attDetail}`;
+    desc += `\nLa fausse page contient un formulaire qui envoie tout ce qui est saisi (identifiant, mot de passe) directement au serveur de l'attaquant. Ce dernier peut ensuite se connecter au vrai compte de la victime, consulter ses donnees, ou changer le mot de passe pour en bloquer l'acces.`;
+  } else if (typeLower.includes('malware') || hasAttachments) {
+    desc = `Quelqu'un se fait passer pour ${sender} et envoie une piece jointe malveillante.`;
+    if (attDetail) desc += `\n${attDetail}`;
+    if (urlDetail) desc += `\n${urlDetail}, qui peut servir a telecharger du contenu dangereux.`;
+    desc += `\nL'attaquant pourrait alors voler des fichiers, espionner l'activite ou prendre le controle du poste a distance.`;
+  } else if (typeLower.includes('bec') || typeLower.includes('usurpation') || typeLower.includes('compromise')) {
+    desc = `Quelqu'un usurpe l'identite de ${sender}${impEntity && impEntity !== 'N/A' ? ` en se faisant passer pour ${impEntity}` : ''} pour faire croire a une demande legitime.`;
+    if (urlDetail) desc += `\n${urlDetail}.`;
+    desc += `\nLe but est de pousser la victime a effectuer un virement ou a transmettre des donnees sensibles.`;
+  } else if (score >= 45 && urlCount) {
+    desc = `Quelqu'un se fait passer pour ${sender} et incite a cliquer sur ${urlCount > 1 ? 'des liens frauduleux' : 'un lien frauduleux'}.`;
+    if (urlDetail) desc += `\n${urlDetail}.`;
+    if (attDetail) desc += `\n${attDetail}`;
+    desc += `\nEn cliquant, la victime serait redirigee vers un site malveillant pour recuperer ses informations personnelles.`;
+  } else if (score >= 45) {
+    desc = `Quelqu'un se fait passer pour ${sender} et tente de creer un sentiment d'urgence pour pousser la victime a agir sans reflechir.`;
+    if (kws.length) desc += `\nMots-cles utilises pour manipuler : ${kws.join(', ')}.`;
+    if (urlDetail) desc += `\n${urlDetail}.`;
+    if (attDetail) desc += `\n${attDetail}`;
+    desc += `\nL'objectif est de soutirer des informations personnelles ou de faire cliquer sur un contenu dangereux.`;
+  } else {
+    desc = `Email de ${sender} analyse (sujet : "${subject}"). Aucun danger significatif detecte apres analyse.`;
+  }
 
   // ── Build attack narrative (victim scenario) ──
   let attackNarrative = '';
