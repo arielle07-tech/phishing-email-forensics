@@ -771,30 +771,39 @@ function resetAnalysisView() {
   document.getElementById('btnCreateTicket').style.display = 'none';
   // Restaurer le welcome
   const el = document.getElementById('analysisContent');
-  el.innerHTML = `<div id="analysisWelcome">
-    <div class="overview-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
-      <div class="stat-card" onclick="document.getElementById('fileInput').click()" style="cursor:pointer">
-        <div class="stat-value" style="font-size:24px">&#x1f4c2;</div><div class="stat-label">Importer .eml</div>
-      </div>
-      <div class="stat-card" onclick="document.getElementById('pasteZone').style.display=document.getElementById('pasteZone').style.display==='none'?'block':'none'" style="cursor:pointer">
-        <div class="stat-value" style="font-size:24px">&#x1f4cb;</div><div class="stat-label">Coller texte</div>
-      </div>
+  el.innerHTML = `<div id="analysisWelcome" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:24px">
+    <div id="dropZoneWelcome" style="width:100%;max-width:600px;border:2px dashed var(--border2);border-radius:16px;padding:48px 32px;text-align:center;cursor:pointer;transition:all .3s;background:var(--bg2)"
+      onclick="document.getElementById('emlInput').click()"
+      ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='var(--accent-dim)'"
+      ondragleave="this.style.borderColor='var(--border2)';this.style.background='var(--bg2)'"
+      ondrop="event.preventDefault();this.style.borderColor='var(--border2)';this.style.background='var(--bg2)';const f=event.dataTransfer.files[0];if(f)uploadEml(f)">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" style="margin-bottom:16px;opacity:.7">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px">Glissez un fichier .eml / .msg ici</div>
+      <div style="font-size:13px;color:var(--text2)">ou cliquez pour parcourir vos fichiers</div>
     </div>
-    <div id="pasteZone" style="display:none;margin-bottom:24px">
-      <div class="panel"><div class="panel-header">Coller le contenu brut d'un email</div><div class="panel-body">
-        <textarea id="welcomePasteArea" rows="8" style="width:100%;background:var(--bg1);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:12px;font-family:monospace;font-size:12px;resize:vertical" placeholder="Collez ici le contenu brut d'un email (headers + body)..."></textarea>
+    <div style="display:flex;align-items:center;gap:16px;width:100%;max-width:600px">
+      <div style="flex:1;height:1px;background:var(--border2)"></div>
+      <span style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">ou</span>
+      <div style="flex:1;height:1px;background:var(--border2)"></div>
+    </div>
+    <div style="width:100%;max-width:600px">
+      <div id="pasteZoneWelcome" style="display:none">
+        <textarea id="welcomePasteArea" rows="8" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border2);border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:12px;resize:vertical" placeholder="Collez ici le contenu brut d'un email (headers + body)..."></textarea>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn btn-primary" onclick="analyzeWelcomePaste()">Analyser le texte</button>
-          <button class="btn" onclick="document.getElementById('welcomePasteArea').value='';document.getElementById('pasteZone').style.display='none'">Annuler</button>
+          <button class="btn btn-primary" onclick="analyzeWelcomePaste()">Analyser</button>
+          <button class="btn" onclick="document.getElementById('welcomePasteArea').value='';document.getElementById('pasteZoneWelcome').style.display='none';document.getElementById('btnTogglePaste').style.display='inline-flex'">Annuler</button>
         </div>
-      </div></div>
-    </div>
-    <div class="overview-grid" style="grid-template-columns:1fr 1fr;gap:16px">
-      <div class="panel"><div class="panel-header">Statistiques</div><div class="panel-body" id="welcomeStats"></div></div>
-      <div class="panel"><div class="panel-header">Dernieres analyses</div><div class="panel-body" id="welcomeRecent"></div></div>
+      </div>
+      <button id="btnTogglePaste" class="btn" style="display:inline-flex;align-items:center;gap:6px;margin:0 auto;width:100%" onclick="document.getElementById('pasteZoneWelcome').style.display='block';this.style.display='none'">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+        Coller le contenu brut d'un email
+      </button>
     </div>
   </div>`;
-  renderWelcomeScreen();
 }
 
 // ══════════ FILE INPUTS ══════════
