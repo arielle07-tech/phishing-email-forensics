@@ -4,54 +4,59 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Phishing Email Forensics — SOC Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #141414;
-    --bg2: #1c1c1c;
-    --bg3: #242424;
-    --bg4: #333;
-    --accent: #4a90d9;
-    --accent-dim: rgba(74,144,217,.12);
-    --danger: #d9534f;
-    --danger-dim: rgba(217,83,79,.12);
-    --warning: #e8a838;
-    --warning-dim: rgba(232,168,56,.12);
-    --success: #5cb85c;
-    --success-dim: rgba(92,184,92,.12);
-    --info: #5bc0de;
-    --text: #d4d4d4;
-    --text2: #999;
-    --text3: #666;
-    --border: #2a2a2a;
-    --border2: #3a3a3a;
-    --radius: 6px;
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #1c2128;
+    --bg4: #2d333b;
+    --accent: #58a6ff;
+    --accent-dim: rgba(88,166,255,.1);
+    --danger: #f85149;
+    --danger-dim: rgba(248,81,73,.1);
+    --warning: #d29922;
+    --warning-dim: rgba(210,153,34,.1);
+    --success: #3fb950;
+    --success-dim: rgba(63,185,80,.1);
+    --info: #79c0ff;
+    --text: #e6edf3;
+    --text2: #8b949e;
+    --text3: #484f58;
+    --border: #21262d;
+    --border2: #30363d;
+    --radius: 8px;
   }
 
   * { margin:0; padding:0; box-sizing:border-box; }
 
   body {
-    font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
     font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   /* ── Header ── */
   .header {
-    background: #111;
+    background: var(--bg2);
     border-bottom: 1px solid var(--border);
-    padding: 0 24px;
+    padding: 0 28px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 48px;
+    height: 56px;
   }
 
-  .header-left { display:flex; align-items:center; gap:12px; }
-  .logo-icon { color: var(--accent); font-size: 20px; }
-  .header h1 { font-size: 15px; font-weight: 600; color: #eee; }
-  .header h1 span { color: var(--text2); font-weight: 400; margin-left: 6px; font-size: 12px; }
+  .header-left { display:flex; align-items:center; gap:14px; }
+  .logo-icon { color: var(--accent); font-size: 22px; filter:drop-shadow(0 0 6px rgba(88,166,255,.3)); }
+  .header h1 { font-size: 16px; font-weight: 700; color: var(--text); letter-spacing:-.3px; }
+  .header h1 span { color: var(--text3); font-weight: 400; margin-left: 8px; font-size: 12px; letter-spacing:0; }
 
   .header-actions { display: flex; gap: 8px; align-items: center; }
   .header-actions .status-dot {
@@ -60,19 +65,21 @@
   .header-actions .status-label { font-size: 11px; color: var(--text2); margin-right: 12px; }
 
   .btn {
-    padding: 6px 14px; border-radius: 4px;
+    padding: 7px 16px; border-radius: 6px;
     border: 1px solid var(--border2);
     background: var(--bg3); color: var(--text2);
     cursor: pointer; font-size: 12px;
-    transition: all .15s; font-weight: 500;
+    transition: all .2s; font-weight: 500;
+    letter-spacing: .2px;
   }
-  .btn:hover { background: var(--bg4); color: var(--text); border-color: #555; }
+  .btn:hover { background: var(--bg4); color: var(--text); border-color: var(--text3); }
   .btn-primary {
     background: var(--accent); color: #fff; border: 1px solid var(--accent);
+    box-shadow: 0 1px 4px rgba(88,166,255,.2);
   }
-  .btn-primary:hover { background: #3a7bc8; }
-  .btn-danger { background: var(--danger-dim); color: var(--danger); border-color: rgba(217,83,79,.3); }
-  .btn-sm { padding: 4px 10px; font-size: 11px; }
+  .btn-primary:hover { background: #4a94e0; box-shadow: 0 2px 8px rgba(88,166,255,.3); }
+  .btn-danger { background: var(--danger-dim); color: var(--danger); border-color: rgba(248,81,73,.25); }
+  .btn-sm { padding: 5px 12px; font-size: 11px; }
 
   /* ── Toolbar ── */
   .toolbar {
@@ -92,36 +99,37 @@
 
   /* ── Tabs ── */
   .tabs {
-    display: flex; background: var(--bg2); border-bottom: 1px solid var(--border);
-    padding: 0 24px;
+    display: flex; background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 0 28px; gap: 4px;
   }
   .tab {
-    padding: 10px 20px; font-size: 12px; color: var(--text2);
+    padding: 12px 22px; font-size: 13px; color: var(--text2);
     cursor: pointer; border-bottom: 2px solid transparent;
-    font-weight: 500; transition: all .15s;
+    font-weight: 500; transition: all .2s; position: relative;
   }
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:hover { color: var(--text); background: rgba(255,255,255,.02); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
   .tab .badge {
-    display: inline-block; padding: 1px 6px; border-radius: 10px;
+    display: inline-block; padding: 2px 7px; border-radius: 10px;
     font-size: 10px; font-weight: 700; margin-left: 6px;
     background: var(--danger-dim); color: var(--danger);
   }
 
   /* ── Container ── */
-  .container { padding: 20px 24px; max-width: 1600px; margin: 0 auto; }
+  .container { padding: 24px 28px; max-width: 1600px; margin: 0 auto; }
 
   /* ── Overview Grid ── */
-  .overview-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 20px; }
+  .overview-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 24px; }
   @media(max-width:1200px) { .overview-grid { grid-template-columns: repeat(3, 1fr); } }
   @media(max-width:600px) { .overview-grid { grid-template-columns: repeat(2, 1fr); } }
 
   .metric-card {
     background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 16px; position: relative;
+    padding: 18px 16px; position: relative; transition: border-color .2s;
   }
-  .metric-card .metric-value { font-size: 28px; font-weight: 700; margin-bottom: 2px; font-variant-numeric: tabular-nums; }
-  .metric-card .metric-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; }
+  .metric-card:hover { border-color: var(--border2); }
+  .metric-card .metric-value { font-size: 30px; font-weight: 800; margin-bottom: 4px; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+  .metric-card .metric-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .8px; font-weight: 500; }
   .metric-card .metric-indicator {
     position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: var(--radius) var(--radius) 0 0;
   }
@@ -132,14 +140,16 @@
 
   .panel {
     background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+    transition: border-color .2s;
   }
+  .panel:hover { border-color: var(--border2); }
   .panel-header {
-    padding: 10px 16px; border-bottom: 1px solid var(--border);
-    font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 8px;
-    text-transform: uppercase; letter-spacing: .5px; color: var(--text2);
-    background: rgba(255,255,255,.02);
+    padding: 12px 18px; border-bottom: 1px solid var(--border);
+    font-weight: 600; font-size: 11px; display: flex; align-items: center; gap: 8px;
+    text-transform: uppercase; letter-spacing: .8px; color: var(--text3);
+    background: rgba(255,255,255,.015);
   }
-  .panel-body { padding: 16px; }
+  .panel-body { padding: 18px; }
   .full-width { grid-column: 1 / -1; }
 
   /* ── History Table ── */
@@ -171,10 +181,10 @@
 
   /* ── Verdict ── */
   .verdict-section { text-align: center; }
-  .score-display { font-size: 56px; font-weight: 800; margin: 8px 0; font-variant-numeric: tabular-nums; }
+  .score-display { font-size: 64px; font-weight: 900; margin: 8px 0; font-variant-numeric: tabular-nums; letter-spacing: -2px; }
   .verdict-label {
-    display: inline-block; padding: 4px 14px; border-radius: 3px;
-    font-size: 12px; font-weight: 700; letter-spacing: 1px;
+    display: inline-block; padding: 5px 18px; border-radius: 4px;
+    font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
   }
 
   /* ── Auth ── */
@@ -193,12 +203,12 @@
   .ioc-item:last-child { border-bottom:none; }
   .ioc-item:hover { background: rgba(255,255,255,.02); }
   .ioc-type { font-size:10px; padding:2px 6px; border-radius:3px; background:var(--bg4); color:var(--accent); font-weight:700; min-width:36px; text-align:center; }
-  .ioc-value { font-family:'Cascadia Code','Consolas',monospace; word-break:break-all; flex:1; font-size:11px; }
+  .ioc-value { font-family:'JetBrains Mono','Cascadia Code','Consolas',monospace; word-break:break-all; flex:1; font-size:11px; }
   .ioc-flag { color:var(--danger); font-size:10px; font-weight:600; }
 
   /* ── Factors ── */
-  .factor { padding:8px 12px; margin-bottom:6px; background:var(--bg3); border-radius:4px; font-size:12px; border-left:3px solid var(--warning); }
-  .anomaly { padding:8px 12px; margin-bottom:6px; background:var(--danger-dim); border-radius:4px; font-size:12px; border-left:3px solid var(--danger); color:#e88; }
+  .factor { padding:10px 14px; margin-bottom:6px; background:var(--bg3); border-radius:6px; font-size:12px; border-left:3px solid var(--warning); line-height:1.5; }
+  .anomaly { padding:10px 14px; margin-bottom:6px; background:var(--danger-dim); border-radius:6px; font-size:12px; border-left:3px solid var(--danger); color:var(--danger); line-height:1.5; }
 
   /* ── Headers table ── */
   .info-table { width:100%; font-size:12px; border-collapse:collapse; }
@@ -217,14 +227,13 @@
   .keyword-tag { display:inline-block; padding:2px 8px; margin:2px; border-radius:3px; font-size:10px; font-weight:600; background:var(--warning-dim); color:var(--warning); }
 
   /* ── Kill Chain ── */
-  .killchain { display:flex; gap:0; margin:12px 0; overflow-x:auto; }
-  .kc-phase { flex:1; min-width:100px; text-align:center; padding:12px 6px; position:relative; border-right:1px solid var(--border); }
-  .kc-phase:last-child { border-right:none; }
-  .kc-phase .kc-name { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text3); }
+  .killchain { display:flex; gap:2px; margin:12px 0; overflow-x:auto; }
+  .kc-phase { flex:1; min-width:100px; text-align:center; padding:14px 8px; position:relative; border-radius:4px; transition:all .2s; }
+  .kc-phase .kc-name { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.8px; color:var(--text3); }
   .kc-phase .kc-count { font-size:16px; font-weight:700; margin-top:4px; }
   .kc-phase.active { background: var(--danger-dim); }
-  .kc-phase.active .kc-name { color: var(--danger); }
-  .kc-phase.inactive { opacity:.3; }
+  .kc-phase.active .kc-name { color: var(--danger); font-weight:700; }
+  .kc-phase.inactive { opacity:.25; }
 
   /* ── Radar Chart ── */
   .radar-container { display:flex; justify-content:center; padding:8px 0; }
@@ -305,13 +314,13 @@
   /* ── Loading overlay ── */
   .loading-overlay {
     position:fixed; top:0; left:0; right:0; bottom:0;
-    background:rgba(20,20,20,.92); z-index:200;
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+    background:rgba(13,17,23,.95); backdrop-filter:blur(8px); z-index:200;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px;
   }
-  .spinner { width:36px; height:36px; border:3px solid var(--border2); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; }
+  .spinner { width:40px; height:40px; border:3px solid var(--border2); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
-  .loading-text { font-size:14px; color:var(--text2); }
-  .loading-sub { font-size:11px; color:var(--text3); }
+  .loading-text { font-size:15px; color:var(--text); font-weight:500; }
+  .loading-sub { font-size:12px; color:var(--text3); }
 
   /* ── Scrollbar ── */
   ::-webkit-scrollbar { width:5px; height:5px; }
@@ -438,17 +447,17 @@
   </div>
   <div class="header-actions">
     <span class="status-dot" id="statusDot" style="background:var(--success)"></span>
-    <span class="status-label" id="statusLabel">Operationnel</span>
+    <span class="status-label" id="statusLabel">RTIR (Request Tracker)</span>
     <input type="file" id="fileInput" accept=".json" style="display:none">
     <input type="file" id="emlInput" accept=".eml,.txt,.msg" style="display:none">
-    <button class="btn" onclick="document.getElementById('fileInput').click()">Importer JSON</button>
+    <button class="btn" onclick="document.getElementById('fileInput').click()" style="font-size:11px">Importer JSON</button>
     <button class="btn" onclick="window.print()" id="btnExport" style="display:none">Export PDF</button>
     <button class="btn" onclick="downloadJSON()" id="btnJSON" style="display:none">Telecharger JSON</button>
     <button class="btn" onclick="downloadIncidentPDF()" id="btnIncidentPDF" style="display:none">Rapport PDF</button>
     <button class="btn" onclick="downloadIncidentDOCX()" id="btnIncidentDOCX" style="display:none">Rapport Word</button>
     <button class="btn btn-primary" onclick="createTicketFromCurrent()" id="btnCreateTicket" style="display:none">Creer ticket</button>
     <button class="btn btn-primary" onclick="document.getElementById('emlInput').click()">Importer fichier</button>
-    <button class="btn" onclick="openSettingsModal()" id="btnSettings" title="Integrations">&#x2699;</button>
+    <button class="btn" onclick="openSettingsModal()" id="btnSettings" title="Integrations" style="padding:7px 10px">&#x2699;</button>
   </div>
 </div>
 
@@ -549,19 +558,12 @@
 <div class="container hidden" id="page-analysis">
   <div id="analysisContent">
     <div id="analysisWelcome">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
-        <div class="upload-area" onclick="document.getElementById('emlInput').click()" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" style="margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:120px;border:2px dashed var(--border2);border-radius:8px;cursor:pointer;transition:border-color 0.2s,background 0.2s" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(59,130,246,0.05)'" onmouseout="this.style.borderColor='var(--border2)';this.style.background='transparent'">
-          <div style="font-size:28px;margin-bottom:8px;opacity:0.6">&#x1f4e5;</div>
-          <div style="font-size:14px;font-weight:600;color:var(--text)">Deposer ou cliquer pour importer</div>
-          <div style="font-size:12px;color:var(--text3);margin-top:4px">Formats : .eml, .msg, .txt</div>
+      <div class="upload-area" onclick="document.getElementById('emlInput').click()" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" style="margin:0 0 24px 0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:160px;border:2px dashed var(--border2);border-radius:12px;cursor:pointer;transition:border-color 0.3s,background 0.3s;background:linear-gradient(135deg,rgba(74,144,217,.03),rgba(74,144,217,.06))" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(74,144,217,0.08)'" onmouseout="this.style.borderColor='var(--border2)';this.style.background='linear-gradient(135deg,rgba(74,144,217,.03),rgba(74,144,217,.06))'">
+        <div style="width:48px;height:48px;border-radius:12px;background:var(--accent-dim);display:flex;align-items:center;justify-content:center;margin-bottom:12px">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--accent)"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         </div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <textarea id="welcomePasteArea" rows="4" style="flex:1;background:var(--bg1);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:'Consolas',monospace;font-size:11px;resize:none" placeholder="Collez ici le contenu brut d'un email (headers + body)..."></textarea>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-primary" onclick="analyzeWelcomePaste()" style="flex:1">Analyser le texte</button>
-            <button class="btn" onclick="document.getElementById('welcomePasteArea').value=''" style="width:80px">Effacer</button>
-          </div>
-        </div>
+        <div style="font-size:15px;font-weight:600;color:var(--text)">Deposer un fichier email suspect</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:6px">Formats acceptes : <span style="color:var(--text2)">.eml</span> &middot; <span style="color:var(--text2)">.msg</span> &middot; <span style="color:var(--text2)">.txt</span></div>
       </div>
 
       <div class="overview-grid" style="grid-template-columns:1fr 1fr;gap:16px">
