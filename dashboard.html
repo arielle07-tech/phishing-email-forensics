@@ -1047,6 +1047,16 @@ function renderTopMitre() {
         if (!techniqueNames[tid]) techniqueNames[tid] = name;
       }
     });
+    // Also check impact_analysis mitre_attack
+    const impact = a.impact_analysis || {};
+    (impact.mitre_attack || []).forEach(t => {
+      const tid = t.id || t.technique_id || '';
+      const name = t.name || t.technique || tid;
+      if (tid) {
+        techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
+        if (!techniqueNames[tid]) techniqueNames[tid] = name;
+      }
+    });
   });
 
   const top = Object.entries(techniqueCount).sort((a,b) => b[1]-a[1]).slice(0, 5);
