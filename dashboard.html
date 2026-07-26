@@ -566,14 +566,9 @@
         <div style="font-size:12px;color:var(--text3);margin-top:6px">Formats acceptes : <span style="color:var(--text2)">.eml</span> &middot; <span style="color:var(--text2)">.msg</span> &middot; <span style="color:var(--text2)">.txt</span></div>
       </div>
 
-      <div class="overview-grid" style="grid-template-columns:1fr 1fr;gap:16px">
-        <div class="panel"><div class="panel-header">Statistiques</div><div class="panel-body" id="welcomeStats">
-          <div style="color:var(--text3);text-align:center;padding:20px">Chargement...</div>
-        </div></div>
-        <div class="panel"><div class="panel-header">Dernieres analyses</div><div class="panel-body" id="welcomeRecent">
-          <div style="color:var(--text3);text-align:center;padding:20px">Aucune analyse</div>
-        </div></div>
-      </div>
+      <div class="panel" style="max-width:800px;margin:0 auto"><div class="panel-header">Dernieres analyses</div><div class="panel-body" id="welcomeRecent">
+        <div style="color:var(--text3);text-align:center;padding:20px">Aucune analyse</div>
+      </div></div>
     </div>
   </div>
 </div>
@@ -634,6 +629,10 @@
   </div>
 
   <div class="toolbar" style="background:transparent;border:none;padding:0 0 12px 0">
+    <label>Du</label>
+    <input type="datetime-local" id="ticketFilterFrom" onchange="renderTicketBoard()">
+    <label>Au</label>
+    <input type="datetime-local" id="ticketFilterTo" onchange="renderTicketBoard()">
     <label>Priorite</label>
     <select id="ticketFilterPriority" onchange="renderTicketBoard()">
       <option value="">Toutes</option>
@@ -642,12 +641,20 @@
       <option value="medium">Medium</option>
       <option value="low">Low</option>
     </select>
+    <label>Statut</label>
+    <select id="ticketFilterStatus" onchange="renderTicketBoard()">
+      <option value="">Tous</option>
+      <option value="open">Ouvert</option>
+      <option value="in_progress">En cours</option>
+      <option value="closed">Ferme</option>
+    </select>
     <label>Assigne a</label>
     <select id="ticketFilterAssignee" onchange="renderTicketBoard()">
       <option value="">Tous</option>
     </select>
     <input type="text" id="ticketSearch" placeholder="Rechercher..." style="width:180px" oninput="renderTicketBoard()">
     <div class="spacer"></div>
+    <button class="btn btn-sm" onclick="resetTicketFilters()">Reset</button>
     <button class="btn btn-sm btn-primary" onclick="openNewTicketModal()">+ Nouveau ticket</button>
   </div>
 
@@ -700,44 +707,10 @@ function switchTab(tab) {
 
 // ══════════ WELCOME SCREEN ══════════
 function renderWelcomeScreen() {
-  const statsEl = document.getElementById('welcomeStats');
   const recentEl = document.getElementById('welcomeRecent');
-  if (!statsEl) return;
+  if (!recentEl) return;
 
   const total = analysisHistory.length;
-  const critical = analysisHistory.filter(e => e.level === 'CRITICAL').length;
-  const high = analysisHistory.filter(e => e.level === 'HIGH').length;
-  const medium = analysisHistory.filter(e => e.level === 'MEDIUM').length;
-  const low = analysisHistory.filter(e => e.level === 'LOW' || e.level === 'INFO').length;
-  const ticketCount = tickets.filter(t => t.status !== 'closed').length;
-
-  statsEl.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div style="text-align:center;padding:12px;background:var(--bg1);border-radius:8px">
-        <div style="font-size:28px;font-weight:700;color:var(--accent)">${total}</div>
-        <div style="font-size:11px;color:var(--text3)">Analyses totales</div>
-      </div>
-      <div style="text-align:center;padding:12px;background:var(--bg1);border-radius:8px">
-        <div style="font-size:28px;font-weight:700;color:var(--warning)">${ticketCount}</div>
-        <div style="font-size:11px;color:var(--text3)">Tickets ouverts</div>
-      </div>
-      <div style="text-align:center;padding:12px;background:var(--bg1);border-radius:8px">
-        <div style="font-size:16px;font-weight:600">
-          <span style="color:var(--danger)">${critical}</span> /
-          <span style="color:var(--warning)">${high}</span> /
-          <span style="color:#f0ad4e">${medium}</span> /
-          <span style="color:var(--success)">${low}</span>
-        </div>
-        <div style="font-size:11px;color:var(--text3)">Crit / High / Med / Low</div>
-      </div>
-      <div style="text-align:center;padding:12px;background:var(--bg1);border-radius:8px">
-        <div style="font-size:16px;font-weight:600;color:${integrationStatus.connected?'var(--success)':'var(--text3)'}">
-          ${integrationStatus.connected ? '&#x2705; ' + (integrationStatus.display_name||'') : '&#x26aa; Local'}
-        </div>
-        <div style="font-size:11px;color:var(--text3)">Integration</div>
-      </div>
-    </div>`;
-
   if (total === 0) {
     recentEl.innerHTML = '<div style="color:var(--text3);text-align:center;padding:20px">Aucune analyse — importez un fichier .eml ou .msg pour commencer</div>';
     return;
@@ -803,7 +776,11 @@ function resetAnalysisView() {
         Coller le contenu brut d'un email
       </button>
     </div>
+    <div class="panel" style="width:100%;max-width:600px;margin-top:8px"><div class="panel-header">Dernieres analyses</div><div class="panel-body" id="welcomeRecent">
+      <div style="color:var(--text3);text-align:center;padding:20px">Aucune analyse</div>
+    </div></div>
   </div>`;
+  renderWelcomeScreen();
 }
 
 // ══════════ FILE INPUTS ══════════
@@ -2172,14 +2149,30 @@ function updateTicketBadge() {
 function getFilteredTickets() {
   let filtered = [...tickets];
   const priority = document.getElementById('ticketFilterPriority').value;
+  const status = document.getElementById('ticketFilterStatus').value;
   const assignee = document.getElementById('ticketFilterAssignee').value;
   const search = document.getElementById('ticketSearch').value.toLowerCase();
+  const fromDate = document.getElementById('ticketFilterFrom').value;
+  const toDate = document.getElementById('ticketFilterTo').value;
 
   if (priority) filtered = filtered.filter(t => t.priority === priority);
+  if (status) filtered = filtered.filter(t => t.status === status);
   if (assignee) filtered = filtered.filter(t => t.assignee === assignee);
   if (search) filtered = filtered.filter(t => (t.title + t.description + t.assignee).toLowerCase().includes(search));
+  if (fromDate) filtered = filtered.filter(t => t.created >= fromDate);
+  if (toDate) filtered = filtered.filter(t => t.created <= toDate);
 
   return filtered;
+}
+
+function resetTicketFilters() {
+  document.getElementById('ticketFilterFrom').value = '';
+  document.getElementById('ticketFilterTo').value = '';
+  document.getElementById('ticketFilterPriority').value = '';
+  document.getElementById('ticketFilterStatus').value = '';
+  document.getElementById('ticketFilterAssignee').value = '';
+  document.getElementById('ticketSearch').value = '';
+  renderTicketBoard();
 }
 
 function renderTicketBoard() {
