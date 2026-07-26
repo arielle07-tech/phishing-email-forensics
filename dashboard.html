@@ -1105,7 +1105,6 @@ function renderOverviewTimeline() {
 
 // ══════════ STATUT DES TICKETS ══════════
 function renderTicketStatus() {
-  const tickets = JSON.parse(localStorage.getItem('phishing_tickets') || '[]');
   if (!tickets.length) { document.getElementById('ticketStatusPanel').innerHTML = '<div class="empty-state">Aucun ticket</div>'; return; }
 
   const open = tickets.filter(t => t.status === 'open' || t.status === 'nouveau' || t.status === 'new').length;
