@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   :root {
     --bg: #0d1117;
@@ -431,6 +433,38 @@
     align-items:center; justify-content:center;
   }
   #lightbox-overlay .lightbox-close:hover { background:rgba(255,255,255,.25); }
+
+  /* ── Light theme ── */
+  [data-theme="light"] {
+    --bg: #ffffff; --bg2: #f6f8fa; --bg3: #eaeef2; --bg4: #d0d7de;
+    --accent: #0969da; --accent-dim: rgba(9,105,218,.1);
+    --danger: #cf222e; --danger-dim: rgba(207,34,46,.1);
+    --warning: #9a6700; --warning-dim: rgba(154,103,0,.1);
+    --success: #1a7f37; --success-dim: rgba(26,127,55,.1);
+    --info: #0550ae;
+    --text: #1f2328; --text2: #656d76; --text3: #8c959f;
+    --border: #d0d7de; --border2: #d8dee4;
+  }
+  [data-theme="light"] .header { background: #f6f8fa; }
+  [data-theme="light"] .tab { color: #656d76; }
+  [data-theme="light"] .tab.active { color: #0969da; border-bottom-color: #0969da; }
+  [data-theme="light"] .btn { background: #f6f8fa; color: #1f2328; border-color: #d0d7de; }
+  [data-theme="light"] .btn:hover { background: #eaeef2; }
+  [data-theme="light"] .btn-primary { background: #0969da; color: #fff; border-color: #0969da; }
+  [data-theme="light"] .panel { background: #ffffff; border-color: #d0d7de; }
+  [data-theme="light"] .panel:hover { border-color: #0969da; }
+  [data-theme="light"] .metric-card { background: #f6f8fa; border-color: #d0d7de; }
+  [data-theme="light"] .stat-card { background: #f6f8fa; border-color: #d0d7de; }
+  [data-theme="light"] .loading-overlay { background: rgba(255,255,255,.85); }
+  [data-theme="light"] .ticket-card { background: #f6f8fa; border-color: #d0d7de; }
+  [data-theme="light"] .ticket-column { background: #f6f8fa; }
+
+  /* Leaflet dark popup */
+  .dark-popup .leaflet-popup-content-wrapper { background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.5); }
+  .dark-popup .leaflet-popup-tip { background:var(--bg2); }
+  .dark-popup .leaflet-popup-close-button { color:var(--text2); }
+  .leaflet-control-attribution { background:rgba(13,17,23,.8)!important; color:var(--text3)!important; font-size:9px!important; }
+  .leaflet-control-attribution a { color:var(--text3)!important; }
 </style>
 </head>
 <body>
@@ -457,6 +491,7 @@
     <button class="btn" onclick="downloadIncidentDOCX()" id="btnIncidentDOCX" style="display:none">Rapport Word</button>
     <button class="btn btn-primary" onclick="createTicketFromCurrent()" id="btnCreateTicket" style="display:none">Creer ticket</button>
     <button class="btn btn-primary" onclick="document.getElementById('emlInput').click()">Importer fichier</button>
+    <button class="btn" onclick="toggleTheme()" id="btnThemeToggle" title="Theme clair/sombre" style="padding:7px 10px;font-size:14px">&#x263E;</button>
     <button class="btn" onclick="openSettingsModal()" id="btnSettings" title="Integrations" style="padding:7px 10px">&#x2699;</button>
   </div>
 </div>
@@ -1166,6 +1201,7 @@ function renderAnalysis(a) {
       <div class="panel"><div class="panel-header">Facteurs de Risque</div><div class="panel-body" id="factorsPanel"></div></div>
       <div class="panel"><div class="panel-header">Informations Email</div><div class="panel-body" id="headersPanel"></div></div>
       <div class="panel"><div class="panel-header">Pieces Jointes</div><div class="panel-body" id="attachmentsPanel"></div></div>
+      <div class="panel" id="whoisSection" style="display:none"><div class="panel-header">&#x1F50D; Whois Domaine Expediteur</div><div class="panel-body" id="whoisPanel"></div></div>
       <div class="panel full-width" id="threatSection"><div class="panel-header">&#x1f6a8; Analyse des Menaces — Pieces Jointes</div><div class="panel-body" id="threatPanel"></div></div>
       <div class="panel full-width" id="ipSection"><div class="panel-header">&#x1f310; Analyse des IPs</div><div class="panel-body" id="ipPanel"></div></div>
       <div class="panel full-width" id="sandboxSection" style="display:none"><div class="panel-header">&#x1f4f7; Sandbox URLs — Captures d'ecran</div><div class="panel-body" id="sandboxPanel"></div></div>
@@ -1187,6 +1223,7 @@ function renderAnalysis(a) {
   renderIOCs(a);
   renderFactors(a);
   renderHeaders(a);
+  renderWhois(a);
   renderAttachments(a);
   renderThreatAnalysis(a);
   renderIPAnalysis(a);
@@ -1293,13 +1330,78 @@ function renderIOCs(a) {
 function renderFactors(a) {
   const factors = (a.risk_scoring||{}).factors||[];
   if (!factors.length) { document.getElementById('factorsPanel').innerHTML = '<div class="empty-state">Aucun facteur</div>'; return; }
-  document.getElementById('factorsPanel').innerHTML = factors.map(f => `<div class="factor">${esc(f)}</div>`).join('');
+  const score = (a.verdict||{}).score||0;
+  let html = '';
+  // Parse factor points and render as visual bars
+  factors.forEach(function(f) {
+    const match = f.match(/\([\+]?(\d+)\)/);
+    const pts = match ? parseInt(match[1]) : 0;
+    const pct = score > 0 ? Math.min(100, Math.round((pts / score) * 100)) : 0;
+    const barColor = pts >= 15 ? 'var(--danger)' : pts >= 10 ? 'var(--warning)' : pts >= 5 ? 'var(--info)' : 'var(--text3)';
+    html += '<div style="margin-bottom:8px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">';
+    html += '<span style="font-size:11px;color:var(--text)">' + esc(f.replace(/\s*\(\+?\d+\)/, '')) + '</span>';
+    html += '<span style="font-size:11px;font-weight:700;color:' + barColor + '">+' + pts + '</span>';
+    html += '</div>';
+    html += '<div style="height:4px;background:var(--bg);border-radius:2px;overflow:hidden">';
+    html += '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:2px;transition:width 0.5s"></div>';
+    html += '</div></div>';
+  });
+  // Total
+  html += '<div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid var(--border);margin-top:4px">';
+  html += '<span style="font-size:12px;font-weight:600;color:var(--text)">Score total</span>';
+  html += '<span style="font-size:14px;font-weight:800;color:' + (score>=80?'var(--danger)':score>=50?'var(--warning)':'var(--success)') + '">' + score + '/100</span>';
+  html += '</div>';
+  document.getElementById('factorsPanel').innerHTML = html;
 }
 
 function renderHeaders(a) {
   const m = a.metadata||{};
   const rows = [['De',m.from],['A',m.to],['Sujet',m.subject],['Date',m.date],['Message-ID',m.message_id],['Reply-To',m.reply_to],['Return-Path',m.return_path]].filter(r => r[1] && r[1]!=='None' && r[1].trim());
   document.getElementById('headersPanel').innerHTML = `<table class="info-table">${rows.map(r => `<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join('')}</table>`;
+}
+
+function renderWhois(a) {
+  var w = a.whois;
+  var el = document.getElementById('whoisSection');
+  if (!w || w.error === 'Module python-whois non installe') { el.style.display='none'; return; }
+  el.style.display='';
+
+  var ageColor = 'var(--success)';
+  var ageLabel = '';
+  if (w.domain_age_days !== null) {
+    if (w.domain_age_days < 30) { ageColor = 'var(--danger)'; ageLabel = 'Tres recent — tres suspect'; }
+    else if (w.domain_age_days < 90) { ageColor = 'var(--danger)'; ageLabel = 'Recent — suspect'; }
+    else if (w.domain_age_days < 365) { ageColor = 'var(--warning)'; ageLabel = 'Moins d\'un an'; }
+    else { ageColor = 'var(--success)'; ageLabel = 'Etabli'; }
+  }
+
+  var html = '<table class="info-table">';
+  html += '<tr><td>Domaine</td><td><span style="font-family:\'JetBrains Mono\',monospace;color:var(--accent)">' + esc(w.domain) + '</span></td></tr>';
+  if (w.registrar) html += '<tr><td>Registrar</td><td>' + esc(w.registrar) + '</td></tr>';
+  if (w.creation_date) {
+    html += '<tr><td>Date de creation</td><td>' + esc(w.creation_date);
+    if (w.domain_age_days !== null) {
+      html += ' <span style="color:' + ageColor + ';font-weight:600;font-size:11px">(' + w.domain_age_days + ' jours — ' + ageLabel + ')</span>';
+    }
+    html += '</td></tr>';
+  }
+  if (w.expiration_date) html += '<tr><td>Expiration</td><td>' + esc(w.expiration_date) + '</td></tr>';
+  if (w.org) html += '<tr><td>Organisation</td><td>' + esc(w.org) + '</td></tr>';
+  if (w.country) html += '<tr><td>Pays</td><td>' + esc(w.country) + '</td></tr>';
+  if (w.name_servers && w.name_servers.length) {
+    html += '<tr><td>Serveurs DNS</td><td>' + w.name_servers.map(function(ns) { return '<span style="display:inline-block;padding:2px 6px;background:var(--bg);border-radius:3px;font-size:11px;font-family:monospace;margin:1px">' + esc(ns) + '</span>'; }).join(' ') + '</td></tr>';
+  }
+  if (w.error) html += '<tr><td>Erreur</td><td style="color:var(--warning)">' + esc(w.error) + '</td></tr>';
+  html += '</table>';
+
+  if (w.suspicious_age) {
+    html += '<div style="margin-top:10px;padding:8px 12px;background:var(--danger-dim);border:1px solid rgba(248,81,73,.2);border-radius:6px;font-size:12px;color:var(--danger)">';
+    html += '&#x26A0; Domaine cree il y a moins de 90 jours — indicateur fort de phishing';
+    html += '</div>';
+  }
+
+  document.getElementById('whoisPanel').innerHTML = html;
 }
 
 function renderAttachments(a) {
@@ -1570,7 +1672,51 @@ function renderIPAnalysis(a) {
     html += '</div>';
   }
 
+  // ── IP Geolocation Map ──
+  var geoPoints = enriched.filter(function(ip) {
+    return ip.geo && ip.geo.latitude && ip.geo.longitude;
+  });
+  if (geoPoints.length) {
+    html += '<div style="margin-top:16px;border-top:1px solid var(--border2);padding-top:12px">';
+    html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;margin-bottom:8px;letter-spacing:.5px">Geolocalisation des IPs</div>';
+    html += '<div id="ipMap" style="height:300px;border-radius:8px;border:1px solid var(--border2);overflow:hidden"></div>';
+    html += '</div>';
+  }
+
   document.getElementById('ipPanel').innerHTML = html;
+
+  // Initialize Leaflet map if we have geo points
+  if (geoPoints.length && typeof L !== 'undefined') {
+    setTimeout(function() {
+      var mapEl = document.getElementById('ipMap');
+      if (!mapEl) return;
+      var map = L.map('ipMap', {scrollWheelZoom: false}).setView([30, 0], 2);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OSM &copy; CARTO',
+        maxZoom: 18
+      }).addTo(map);
+      geoPoints.forEach(function(ip) {
+        var abuseScore = (ip.abuse||{}).abuse_score || 0;
+        var color = abuseScore >= 75 ? '#f85149' : abuseScore >= 25 ? '#d29922' : '#3fb950';
+        var circle = L.circleMarker([ip.geo.latitude, ip.geo.longitude], {
+          radius: 8, fillColor: color, color: '#fff', weight: 2, fillOpacity: 0.8
+        }).addTo(map);
+        var popupContent = '<div style="font-family:Inter,sans-serif;font-size:12px;color:#e6edf3;min-width:160px">' +
+          '<div style="font-weight:700;font-family:JetBrains Mono,monospace;color:#58a6ff;margin-bottom:4px">' + esc(ip.ip) + '</div>' +
+          '<div>' + esc((ip.geo.city||'') + (ip.geo.city&&ip.geo.country?', ':'') + (ip.geo.country||'')) + '</div>' +
+          (ip.geo.org ? '<div style="color:#8b949e;font-size:11px">' + esc(ip.geo.org) + '</div>' : '') +
+          (ip.abuse ? '<div style="margin-top:4px;color:' + color + ';font-weight:600">Abuse: ' + abuseScore + '%</div>' : '') +
+          '</div>';
+        circle.bindPopup(popupContent, {className: 'dark-popup'});
+      });
+      if (geoPoints.length > 1) {
+        var bounds = geoPoints.map(function(ip) { return [ip.geo.latitude, ip.geo.longitude]; });
+        map.fitBounds(bounds, {padding: [30, 30]});
+      } else {
+        map.setView([geoPoints[0].geo.latitude, geoPoints[0].geo.longitude], 6);
+      }
+    }, 100);
+  }
 }
 
 function renderImpactAnalysis(a) {
@@ -1713,27 +1859,59 @@ function renderSandbox(a) {
 
 function renderKillChain(a) {
   document.getElementById('killchainSection').classList.remove('hidden');
-  const mitre = (a.ai_analysis||{}).mitre_techniques||[];
+  // Merge all MITRE sources
+  const aiMitre = (a.ai_analysis||{}).mitre_techniques||[];
+  const impactMitre = ((a.impact_analysis||{}).mitre_attack||[]);
+  const enrichMitre = ((a.enrichment||{}).mitre_mapping||[]);
+  const allMitre = [].concat(aiMitre, impactMitre, enrichMitre);
+
   const phases = [
-    {id:'recon',name:'Recon',techniques:['T1598','T1593','T1592']},
-    {id:'weaponize',name:'Weaponization',techniques:['T1608']},
-    {id:'delivery',name:'Delivery',techniques:['T1566']},
-    {id:'exploit',name:'Exploitation',techniques:['T1203','T1204']},
-    {id:'install',name:'Installation',techniques:['T1105']},
-    {id:'c2',name:'C2',techniques:['T1071']},
-    {id:'action',name:'Action',techniques:['T1078','T1110']},
+    {id:'recon',name:'Recon',tactics:['Reconnaissance'],techniques:['T1598','T1593','T1592']},
+    {id:'weaponize',name:'Weaponization',tactics:['Resource Development'],techniques:['T1608','T1583','T1588']},
+    {id:'delivery',name:'Delivery',tactics:['Initial Access'],techniques:['T1566','T1190']},
+    {id:'exploit',name:'Exploitation',tactics:['Execution'],techniques:['T1203','T1204']},
+    {id:'install',name:'Installation',tactics:['Persistence','Defense Evasion'],techniques:['T1105','T1027']},
+    {id:'c2',name:'C2',tactics:['Command and Control'],techniques:['T1071','T1573']},
+    {id:'action',name:'Action',tactics:['Collection','Exfiltration','Impact','Credential Access'],techniques:['T1078','T1110','T1056']},
   ];
-  const mitreIds = mitre.map(m => m.id ? m.id.split('.')[0] : '');
+
+  const mitreIds = allMitre.map(m => {
+    const id = m.id || m.technique_id || m.technique || '';
+    return id.split('.')[0];
+  });
+  const mitreTactics = allMitre.map(m => m.tactic || '');
+
   const ha = ((a.iocs||{}).html_attachment_analysis)||{};
+  const bodyHtml = ((a.iocs||{}).body_html_analysis)||{};
+
+  // Build detail tooltips
+  const phaseDetails = {};
+  allMitre.forEach(m => {
+    const tid = (m.id || m.technique_id || m.technique || '').split('.')[0];
+    const tactic = m.tactic || '';
+    phases.forEach(p => {
+      if (p.techniques.some(t => tid.startsWith(t)) || p.tactics.some(t => tactic.includes(t))) {
+        if (!phaseDetails[p.id]) phaseDetails[p.id] = [];
+        phaseDetails[p.id].push(m.name || m.technique || tid);
+      }
+    });
+  });
+
   document.getElementById('killchainPanel').innerHTML = '<div class="killchain">' +
     phases.map(p => {
-      const count = mitreIds.filter(id => p.techniques.some(t => id.startsWith(t))).length;
+      const count = mitreIds.filter(id => p.techniques.some(t => id.startsWith(t))).length
+        + mitreTactics.filter(t => p.tactics.some(pt => t.includes(pt))).length;
       let active = count > 0 || (p.id==='delivery' && (a.iocs||{}).urls_count > 0);
-      // Activate phases from HTML analysis
       if (p.id==='delivery' && (a.attachments||[]).length) active = true;
-      if (p.id==='exploit' && (ha.has_scripts || ha.has_forms)) active = true;
-      if (p.id==='action' && (ha.has_password_field || ha.has_data_exfil)) active = true;
-      return `<div class="kc-phase ${active?'active':'inactive'}"><div class="kc-name">${p.name}</div><div class="kc-count" style="color:${active?'var(--danger)':'var(--text3)'}">${active?(count||'!'):'-'}</div></div>`;
+      if (p.id==='exploit' && (ha.has_scripts || ha.has_forms || bodyHtml.has_forms)) active = true;
+      if (p.id==='action' && (ha.has_password_field || ha.has_data_exfil || bodyHtml.has_password_field)) active = true;
+      const details = (phaseDetails[p.id] || []).filter((v,i,a) => a.indexOf(v)===i).slice(0,3);
+      const tooltip = details.length ? details.join(', ') : '';
+      return '<div class="kc-phase ' + (active?'active':'inactive') + '" title="' + esc(tooltip) + '">' +
+        '<div class="kc-name">' + p.name + '</div>' +
+        '<div class="kc-count" style="color:' + (active?'var(--danger)':'var(--text3)') + '">' + (active?(count||'!'):'—') + '</div>' +
+        (active && details.length ? '<div style="font-size:9px;color:var(--text2);margin-top:4px;line-height:1.3">' + esc(details[0]) + '</div>' : '') +
+        '</div>';
     }).join('') + '</div>';
 }
 
@@ -2068,6 +2246,22 @@ function loadDemoData() {
   processReport(demo);
 }
 
+// ══════════ THEME ══════════
+function toggleTheme() {
+  var current = document.documentElement.getAttribute('data-theme') || 'dark';
+  var next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('phishing_theme', next);
+  document.getElementById('btnThemeToggle').innerHTML = next === 'dark' ? '&#x263E;' : '&#x2600;';
+}
+// Restore saved theme
+(function() {
+  var saved = localStorage.getItem('phishing_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  var btn = document.getElementById('btnThemeToggle');
+  if (btn) btn.innerHTML = saved === 'dark' ? '&#x263E;' : '&#x2600;';
+})();
+
 // ══════════ INIT ══════════
 updateOverview();
 renderHistoryTable();
@@ -2096,6 +2290,12 @@ function createTicket(opts) {
     score: opts.score || 0,
     level: opts.level || 'INFO',
     emailDate: opts.emailDate || '',
+    attackNarrative: opts.attackNarrative || '',
+    businessImpact: opts.businessImpact || '',
+    responseActions: opts.responseActions || '',
+    mitreData: opts.mitreData || [],
+    seTactics: opts.seTactics || [],
+    attackClassification: opts.attackClassification || '',
     comments: [],
     activity: [{
       time: new Date().toISOString(),
@@ -2118,14 +2318,38 @@ function createTicketFromAnalysis(analysisData, historyId) {
   const level = verdict.risk_level || 'INFO';
   const priorityMap = { 'CRITICAL': 'critical', 'HIGH': 'high', 'MEDIUM': 'medium', 'LOW': 'low', 'INFO': 'low' };
 
+  const impact = analysisData.impact_analysis || {};
+  const ai = analysisData.ai_analysis || {};
+
+  // ── Build rich description ──
   let desc = `Email suspect detecte.\n`;
   desc += `Expediteur: ${meta.from || 'N/A'}\n`;
   desc += `Sujet: ${meta.subject || 'N/A'}\n`;
   desc += `Score: ${verdict.score || 0}/100 (${level})\n`;
   desc += `Date: ${meta.date || 'N/A'}\n`;
+  if (impact.attack_classification) desc += `Classification: ${impact.attack_classification}\n`;
   if ((iocs.urls || []).length) desc += `URLs suspectes: ${iocs.urls.length}\n`;
   if ((iocs.phishing_keywords || []).length) desc += `Mots-cles phishing: ${iocs.phishing_keywords.join(', ')}\n`;
   if (verdict.summary) desc += `\nVerdict: ${verdict.summary}`;
+
+  // ── Build attack narrative (victim scenario) ──
+  let attackNarrative = '';
+  const steps = impact.victim_scenario || [];
+  if (steps.length) {
+    attackNarrative = steps.map(s => `Etape ${s.step} — ${s.action}: ${s.description}`).join('\n\n');
+  }
+
+  // ── Business impact ──
+  const bizImpact = (impact.business_impact || []).join('\n');
+
+  // ── Response actions ──
+  const responseActions = (impact.response_actions || []).join('\n');
+
+  // ── MITRE ATT&CK ──
+  const mitreData = impact.mitre_attack || ai.mitre_techniques || [];
+
+  // ── Social engineering tactics ──
+  const seTactics = ai.social_engineering_tactics || [];
 
   const ticket = createTicket({
     title: `[${level}] ${(meta.subject || 'Email suspect').substring(0, 60)}`,
@@ -2134,7 +2358,13 @@ function createTicketFromAnalysis(analysisData, historyId) {
     score: verdict.score || 0,
     level: level,
     analysisId: historyId || null,
-    emailDate: meta.date || ''
+    emailDate: meta.date || '',
+    attackNarrative: attackNarrative,
+    businessImpact: bizImpact,
+    responseActions: responseActions,
+    mitreData: mitreData,
+    seTactics: seTactics,
+    attackClassification: impact.attack_classification || ''
   });
   switchTab('tickets');
   openTicketDetail(ticket.id);
@@ -2235,6 +2465,96 @@ function getTimeAgo(dateStr) {
 
 // ══════════ TICKET DETAIL MODAL ══════════
 
+function renderTicketNarrative(t) {
+  let html = '';
+
+  // ── Attack scenario ──
+  if (t.attackNarrative) {
+    html += '<div class="modal-section"><h4 style="display:flex;align-items:center;gap:8px"><span style="color:var(--danger)">&#x26A0;</span> Scenario d\'attaque — Comment la victime aurait ete piegee</h4>';
+    if (t.attackClassification) {
+      html += '<div style="display:inline-block;padding:4px 10px;border-radius:4px;background:var(--danger-dim);color:var(--danger);font-size:11px;font-weight:600;margin-bottom:12px">' + esc(t.attackClassification) + '</div>';
+    }
+    html += '<div style="position:relative;padding-left:20px;border-left:2px solid var(--border2)">';
+    t.attackNarrative.split('\n\n').forEach(function(step) {
+      var parts = step.match(/^Etape (\d+) — ([^:]+): (.+)$/s);
+      if (parts) {
+        html += '<div style="margin-bottom:16px;position:relative">';
+        html += '<div style="position:absolute;left:-27px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid var(--bg2)"></div>';
+        html += '<div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:4px">' + esc(parts[2]) + '</div>';
+        html += '<div style="font-size:12px;color:var(--text);line-height:1.5">' + esc(parts[3]) + '</div>';
+        html += '</div>';
+      } else {
+        html += '<div style="margin-bottom:12px;font-size:12px;color:var(--text);line-height:1.5">' + esc(step) + '</div>';
+      }
+    });
+    html += '</div></div>';
+  }
+
+  // ── Social engineering tactics ──
+  if (t.seTactics && t.seTactics.length) {
+    html += '<div class="modal-section"><h4>&#x1F3AD; Tactiques d\'ingenierie sociale</h4>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">';
+    t.seTactics.forEach(function(se) {
+      var effectColor = se.effectiveness === 'high' ? 'var(--danger)' : se.effectiveness === 'medium' ? 'var(--warning)' : 'var(--success)';
+      html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px">';
+      html += '<div style="font-weight:600;font-size:12px;margin-bottom:4px">' + esc(se.tactic) + '</div>';
+      html += '<div style="font-size:11px;color:var(--text2);margin-bottom:6px">' + esc(se.description || '') + '</div>';
+      html += '<div style="display:flex;justify-content:space-between;font-size:10px">';
+      html += '<span style="color:var(--text3)">' + esc(se.cialdini_principle || '') + '</span>';
+      html += '<span style="color:' + effectColor + ';font-weight:600">' + esc(se.effectiveness || '') + '</span>';
+      html += '</div></div>';
+    });
+    html += '</div></div>';
+  }
+
+  // ── MITRE ATT&CK ──
+  if (t.mitreData && t.mitreData.length) {
+    html += '<div class="modal-section"><h4>&#x1F6E1; MITRE ATT&CK</h4>';
+    html += '<div style="display:flex;flex-direction:column;gap:6px">';
+    t.mitreData.forEach(function(m) {
+      var tid = m.id || m.technique_id || m.technique || '';
+      var name = m.name || m.technique || '';
+      var mdesc = m.description || m.relevance || '';
+      var tactic = m.tactic || '';
+      html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">';
+      html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:3px;white-space:nowrap">' + esc(tid) + '</span>';
+      html += '<div><div style="font-size:12px;font-weight:600">' + esc(name) + '</div>';
+      if (tactic) html += '<div style="font-size:10px;color:var(--text3);margin-top:2px">' + esc(tactic) + '</div>';
+      if (mdesc) html += '<div style="font-size:11px;color:var(--text2);margin-top:4px">' + esc(mdesc) + '</div>';
+      html += '</div></div>';
+    });
+    html += '</div></div>';
+  }
+
+  // ── Business impact ──
+  if (t.businessImpact) {
+    html += '<div class="modal-section"><h4>&#x1F4C9; Impact metier</h4>';
+    html += '<div style="display:flex;flex-direction:column;gap:6px">';
+    t.businessImpact.split('\n').filter(Boolean).forEach(function(item) {
+      html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0">';
+      html += '<span style="color:var(--warning);font-size:14px">&#x26A0;</span>';
+      html += '<span style="font-size:12px;color:var(--text)">' + esc(item) + '</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // ── Response actions ──
+  if (t.responseActions) {
+    html += '<div class="modal-section"><h4>&#x2705; Actions de reponse recommandees</h4>';
+    html += '<div style="display:flex;flex-direction:column;gap:4px">';
+    t.responseActions.split('\n').filter(Boolean).forEach(function(action, i) {
+      html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;background:var(--bg);border-radius:4px">';
+      html += '<span style="color:var(--success);font-weight:700;font-size:12px;min-width:20px">' + (i+1) + '.</span>';
+      html += '<span style="font-size:12px;color:var(--text)">' + esc(action) + '</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  return html;
+}
+
 function openTicketDetail(id) {
   const t = tickets.find(x => x.id === id);
   if (!t) return;
@@ -2301,6 +2621,8 @@ function openTicketDetail(id) {
     <button class="btn btn-sm" onclick="reportFromHistory(${t.analysisId},'pdf')">Rapport PDF</button>
     <button class="btn btn-sm" onclick="reportFromHistory(${t.analysisId},'docx')">Rapport Word</button>
   </div>` : ''}
+
+  ` + renderTicketNarrative(t) + `
 
   <div class="modal-section">
     <h4>Commentaires (${t.comments.length})</h4>

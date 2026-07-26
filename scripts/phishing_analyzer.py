@@ -230,6 +230,7 @@ class PhishingAnalyzer:
         self._analyze_attachments()   # avant _extract_iocs pour merger les IOCs des PJ
         self._extract_iocs()
         self._sandbox_urls()          # captures d'ecran des URLs suspectes
+        self._whois_from_domain()     # Whois du domaine expediteur
         self._generate_impact_analysis()  # scenario victime + MITRE ATT&CK
         self._calculate_risk_score()
 
@@ -1391,6 +1392,74 @@ class PhishingAnalyzer:
             "total_captured": len([r for r in results if r.get("screenshot_b64")]),
         }
         print(f"[SANDBOX] {len(results)} URL(s) capturee(s)")
+
+    # ── Whois du domaine expediteur ──
+
+    def _whois_from_domain(self):
+        """Recherche les informations Whois du domaine From."""
+        from_addr = self.report.get("metadata", {}).get("from", "")
+        match = re.search(r'@([\w\.-]+)', from_addr)
+        if not match:
+            return
+        domain = match.group(1).lower()
+
+        whois_info = {
+            "domain": domain,
+            "registrar": None,
+            "creation_date": None,
+            "expiration_date": None,
+            "updated_date": None,
+            "name_servers": [],
+            "country": None,
+            "org": None,
+            "domain_age_days": None,
+            "suspicious_age": False,
+            "error": None
+        }
+
+        try:
+            import whois
+            w = whois.whois(domain)
+
+            if w.registrar:
+                whois_info["registrar"] = str(w.registrar)
+            if w.creation_date:
+                cd = w.creation_date if not isinstance(w.creation_date, list) else w.creation_date[0]
+                if cd:
+                    whois_info["creation_date"] = cd.strftime("%Y-%m-%d") if hasattr(cd, 'strftime') else str(cd)
+                    try:
+                        from datetime import datetime
+                        age = (datetime.now() - cd).days
+                        whois_info["domain_age_days"] = age
+                        if age < 90:
+                            whois_info["suspicious_age"] = True
+                    except Exception:
+                        pass
+            if w.expiration_date:
+                ed = w.expiration_date if not isinstance(w.expiration_date, list) else w.expiration_date[0]
+                if ed and hasattr(ed, 'strftime'):
+                    whois_info["expiration_date"] = ed.strftime("%Y-%m-%d")
+            if w.updated_date:
+                ud = w.updated_date if not isinstance(w.updated_date, list) else w.updated_date[0]
+                if ud and hasattr(ud, 'strftime'):
+                    whois_info["updated_date"] = ud.strftime("%Y-%m-%d")
+            if w.name_servers:
+                ns = w.name_servers if isinstance(w.name_servers, list) else [w.name_servers]
+                whois_info["name_servers"] = [str(n).lower() for n in ns[:4]]
+            if w.country:
+                whois_info["country"] = str(w.country)
+            if w.org:
+                whois_info["org"] = str(w.org)
+
+            print(f"[WHOIS] {domain} — registrar: {whois_info['registrar']}, age: {whois_info['domain_age_days']}j")
+        except ImportError:
+            whois_info["error"] = "Module python-whois non installe"
+            print("[WHOIS] Module python-whois non disponible — pip install python-whois")
+        except Exception as e:
+            whois_info["error"] = str(e)
+            print(f"[WHOIS] Erreur pour {domain}: {e}")
+
+        self.report["whois"] = whois_info
 
     # ── Analyse d'impact — Scenario victime + MITRE ATT&CK ──
 

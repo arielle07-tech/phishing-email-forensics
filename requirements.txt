@@ -25,6 +25,7 @@ python-docx>=1.0         # Word (.docx) incident reports
 
 # === Threat Intel Enrichment ===
 requests>=2.31           # HTTP calls for threat intel APIs (ipapi, AbuseIPDB, VT, URLhaus)
+python-whois>=0.9        # WHOIS domain lookups for sender domain age analysis
 
 # === Embedded Document Analysis ===
 PyMuPDF>=1.24            # PDF parsing for embedded document forensics

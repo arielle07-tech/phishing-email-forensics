@@ -24,7 +24,7 @@ echo.
 echo [3/4] Git commit + push...
 cd /d D:\PhishingMail
 git add -A
-git commit -m "fix: clean up Analyse tab — remove redundant stats/history, add focused drag-and-drop import zone"
+git commit -m "feat: enriched PDF/Word reports with Whois, impact analysis, sandbox screenshots, IP geo enrichment, merged MITRE"
 git push
 
 echo.

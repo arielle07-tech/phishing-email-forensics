@@ -356,8 +356,20 @@ def generate_pdf_report(analysis: dict) -> bytes:
     story.append(Spacer(1, 15*mm))
     has_mitre = bool((ai.get("mitre_techniques", []) if ai else []) or
                      (ai.get("social_engineering_tactics", []) if ai else []) or
-                     classification.get("mitre_tactics"))
+                     classification.get("mitre_tactics") or
+                     analysis.get("impact_analysis", {}).get("mitre_attack"))
+    has_whois = bool(analysis.get("whois", {}) and not analysis.get("whois", {}).get("error"))
+    has_impact = bool(analysis.get("impact_analysis", {}).get("victim_scenario") or
+                      analysis.get("impact_analysis", {}).get("business_impact"))
+    has_sandbox = bool([r for r in analysis.get("url_sandbox", {}).get("results", []) if r.get("screenshot_b64")])
+
     toc_items = ["Executive Summary", "Alert Details", "Triage Decision", "Enrichment Findings"]
+    if has_whois:
+        toc_items.append("Whois Domaine Expediteur")
+    if has_impact:
+        toc_items.append("Analyse d'Impact")
+    if has_sandbox:
+        toc_items.append("Sandbox — Captures URL")
     if has_mitre:
         toc_items.append("MITRE ATT&CK")
     toc_items.append("Recommended Response")
@@ -593,9 +605,42 @@ def generate_pdf_report(analysis: dict) -> bytes:
         story.append(_pdf_styled_table_v2(url_data, [85*mm, 42*mm, CONTENT_W - 127*mm], NAVY))
         story.append(Spacer(1, 6*mm))
 
-    # IPs
+    # IPs (enriched with geo + threat intel)
+    ip_enrichment = iocs.get("ip_enrichment", [])
     ips = iocs.get("ips", [])
-    if ips:
+    if ip_enrichment:
+        story.append(Paragraph("Adresses IP — Enrichissement", styles['SubHeading']))
+        ip_data = [["IP (DEFANGED)", "GEO / PROVIDER", "RISQUE", "THREAT INTEL"]]
+        for ip_e in ip_enrichment[:10]:
+            ip_str = _defang_ip(ip_e.get("ip", ""))
+            geo = ip_e.get("geo", {})
+            geo_str = ""
+            if geo.get("country"):
+                geo_str = f"{geo.get('city', '')}, {geo['country']}" if geo.get('city') else geo['country']
+            provider = ip_e.get("provider", "")
+            if provider:
+                geo_str = f"{geo_str} ({provider})" if geo_str else provider
+            if not geo_str:
+                geo_str = "Privee" if ip_e.get("is_private") else "—"
+            risk_ind = ip_e.get("risk_indicators", [])
+            risk_str = "; ".join(risk_ind[:2]) if risk_ind else "—"
+            abuse = ip_e.get("abuse", {})
+            vt = ip_e.get("vt", {})
+            ti_parts = []
+            if abuse.get("abuse_score"):
+                ti_parts.append(f"Abuse: {abuse['abuse_score']}%")
+            if vt.get("malicious"):
+                ti_parts.append(f"VT: {vt['malicious']} det.")
+            ti_str = ", ".join(ti_parts) if ti_parts else "—"
+            ip_data.append([
+                Paragraph(ip_str, ParagraphStyle('ipc', fontSize=8.5, leading=11, fontName='Courier')),
+                Paragraph(_safe(geo_str), ParagraphStyle('ipg', fontSize=8.5, leading=11)),
+                Paragraph(_safe(risk_str), ParagraphStyle('ipr', fontSize=8.5, leading=11)),
+                Paragraph(_safe(ti_str), ParagraphStyle('ipt', fontSize=8.5, leading=11)),
+            ])
+        story.append(_pdf_styled_table_v2(ip_data, [34*mm, 42*mm, 50*mm, CONTENT_W - 126*mm], NAVY))
+        story.append(Spacer(1, 6*mm))
+    elif ips:
         story.append(Paragraph("Adresses IP", styles['SubHeading']))
         ip_data = [["IP (DEFANGED)", "TYPE", "THREAT INTEL"]]
         for ip_info in ips[:10]:
@@ -658,10 +703,160 @@ def generate_pdf_report(analysis: dict) -> bytes:
             story.append(Spacer(1, 4*mm))
 
     # ════════════════════════════════════════════════════
-    # §5. MITRE ATT&CK MAPPING
+    # §N. WHOIS DOMAINE EXPEDITEUR
+    # ════════════════════════════════════════════════════
+    whois_data = analysis.get("whois", {})
+    if whois_data and not whois_data.get("error"):
+        story.append(PageBreak())
+        sec += 1
+        story.append(_pdf_section_header_v2(str(sec), "WHOIS DOMAINE EXPEDITEUR", NAVY, CONTENT_W))
+        story.append(Spacer(1, 6*mm))
+
+        # Alert if suspicious domain age
+        if whois_data.get("suspicious_age"):
+            age_days = whois_data.get("domain_age_days", 0)
+            alert_cell = [[Paragraph(
+                f'<font color="#ffffff" size="11"><b>ALERTE : Domaine cree il y a {age_days} jours seulement — fortement suspect</b></font>',
+                ParagraphStyle('wa', alignment=TA_CENTER, leading=14))]]
+            wa_t = Table(alert_cell, colWidths=[CONTENT_W], rowHeights=[12*mm])
+            wa_t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), DANGER),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(wa_t)
+            story.append(Spacer(1, 6*mm))
+
+        whois_rows = [
+            ["Domaine", _safe(_defang_domain(whois_data.get("domain", "")))],
+            ["Registrar", _safe(whois_data.get("registrar", "N/A") or "N/A")],
+            ["Date de creation", _safe(whois_data.get("creation_date", "N/A") or "N/A")],
+            ["Date d'expiration", _safe(whois_data.get("expiration_date", "N/A") or "N/A")],
+            ["Age du domaine", f"{whois_data.get('domain_age_days', 'N/A')} jours" if whois_data.get('domain_age_days') is not None else "N/A"],
+            ["Organisation", _safe(whois_data.get("org", "N/A") or "N/A")],
+            ["Pays", _safe(whois_data.get("country", "N/A") or "N/A")],
+            ["Serveurs DNS", _safe(", ".join(whois_data.get("name_servers", [])) or "N/A")],
+        ]
+        story.append(_pdf_info_table_v2(whois_rows, NAVY, CONTENT_W))
+
+    # ════════════════════════════════════════════════════
+    # §N. ANALYSE D'IMPACT — SCENARIO VICTIME
+    # ════════════════════════════════════════════════════
+    impact = analysis.get("impact_analysis", {})
+    victim_scenario = impact.get("victim_scenario", [])
+    business_impact_list = impact.get("business_impact", [])
+    impact_response = impact.get("response_actions", [])
+    attack_class = impact.get("attack_classification", {})
+
+    if victim_scenario or business_impact_list:
+        story.append(PageBreak())
+        sec += 1
+        story.append(_pdf_section_header_v2(str(sec), "ANALYSE D'IMPACT", ACCENT, CONTENT_W))
+        story.append(Spacer(1, 6*mm))
+
+        # Attack classification summary
+        if attack_class:
+            story.append(Paragraph(
+                f"<b>Type d'attaque :</b> {_safe(attack_class.get('type', 'N/A'))}", styles['Body']))
+            story.append(Paragraph(
+                f"<b>Vecteur :</b> {_safe(attack_class.get('vector', 'N/A'))}", styles['Body']))
+            story.append(Paragraph(
+                f"<b>Objectif :</b> {_safe(attack_class.get('objective', 'N/A'))}", styles['Body']))
+            story.append(Spacer(1, 6*mm))
+
+        # Victim scenario timeline
+        if victim_scenario:
+            story.append(Paragraph("Scenario d'attaque — Point de vue victime", styles['SubHeading']))
+            story.append(Paragraph(
+                "<i>Reconstitution des etapes si la victime avait interagi avec l'email.</i>",
+                styles['BodySmall']))
+            story.append(Spacer(1, 4*mm))
+
+            for i, step in enumerate(victim_scenario):
+                step_text = step if isinstance(step, str) else step.get("description", str(step))
+                story.append(Paragraph(
+                    f'<font color="#c0392b"><b>Etape {i+1}</b></font> &mdash; {_safe(step_text)}',
+                    styles['Body']))
+                story.append(Spacer(1, 2*mm))
+            story.append(Spacer(1, 6*mm))
+
+        # Business impact
+        if business_impact_list:
+            story.append(Paragraph("Impact metier potentiel", styles['SubHeading']))
+            for bi in business_impact_list:
+                bi_text = bi if isinstance(bi, str) else str(bi)
+                story.append(Paragraph(f'&bull;  {_safe(bi_text)}', styles['BulletItem']))
+            story.append(Spacer(1, 6*mm))
+
+        # Response actions from impact analysis
+        if impact_response:
+            story.append(Paragraph("Actions de reponse recommandees", styles['SubHeading']))
+            for i, action in enumerate(impact_response):
+                action_text = action if isinstance(action, str) else str(action)
+                story.append(Paragraph(
+                    f'<b>{i+1}.</b> {_safe(action_text)}', styles['Body']))
+            story.append(Spacer(1, 4*mm))
+
+    # ════════════════════════════════════════════════════
+    # §N. SANDBOX URL SCREENSHOTS
+    # ════════════════════════════════════════════════════
+    sandbox = analysis.get("url_sandbox", {})
+    sandbox_results = sandbox.get("results", [])
+    sandbox_with_screenshots = [r for r in sandbox_results if r.get("screenshot_b64")]
+    if sandbox_with_screenshots:
+        import base64
+        from reportlab.platypus import Image as RLImage
+
+        story.append(PageBreak())
+        sec += 1
+        story.append(_pdf_section_header_v2(str(sec), "SANDBOX — CAPTURES URL", NAVY, CONTENT_W))
+        story.append(Spacer(1, 6*mm))
+        story.append(Paragraph(
+            f"<i>{len(sandbox_with_screenshots)} URL(s) capturee(s) en sandbox Chromium.</i>",
+            styles['BodySmall']))
+        story.append(Spacer(1, 4*mm))
+
+        for sr in sandbox_with_screenshots:
+            url_display = _defang_url(sr.get("url", ""))
+            story.append(Paragraph(
+                f'<b>URL :</b> <font face="Courier" size="8">{_safe(url_display[:80])}</font>',
+                styles['Body']))
+            final_url = sr.get("final_url", "")
+            if final_url and final_url != sr.get("url", ""):
+                story.append(Paragraph(
+                    f'<b>Redirection vers :</b> <font face="Courier" size="8">{_safe(_defang_url(final_url)[:80])}</font>',
+                    styles['Body']))
+            story.append(Spacer(1, 3*mm))
+
+            try:
+                img_data = base64.b64decode(sr["screenshot_b64"])
+                img_buf = io.BytesIO(img_data)
+                img = RLImage(img_buf, width=CONTENT_W * 0.9, height=CONTENT_W * 0.5)
+                img.hAlign = 'CENTER'
+                story.append(img)
+            except Exception:
+                story.append(Paragraph(
+                    "<i>[Capture non affichable dans le PDF]</i>", styles['BodySmall']))
+            story.append(Spacer(1, 8*mm))
+
+    # ════════════════════════════════════════════════════
+    # §N. MITRE ATT&CK MAPPING
     # ════════════════════════════════════════════════════
     mitre = ai.get("mitre_techniques", []) if ai else []
     tactics = ai.get("social_engineering_tactics", []) if ai else []
+    # Merge MITRE from impact_analysis
+    impact_mitre = impact.get("mitre_attack", []) if impact else []
+    if impact_mitre:
+        existing_ids = {m.get("id") for m in mitre}
+        for im in impact_mitre:
+            im_id = im.get("id", im.get("technique_id", ""))
+            if im_id and im_id not in existing_ids:
+                mitre.append({
+                    "id": im_id,
+                    "name": im.get("name", im.get("technique", "")),
+                    "tactic": im.get("tactic", ""),
+                    "relevance": im.get("relevance", im.get("description", "")),
+                })
+                existing_ids.add(im_id)
     if mitre or tactics or classification.get("mitre_tactics"):
         story.append(PageBreak())
         sec += 1
@@ -1203,8 +1398,41 @@ def generate_docx_report(analysis: dict) -> bytes:
         _grid_table(url_rows)
         doc.add_paragraph()
 
+    ip_enrichment = iocs.get("ip_enrichment", [])
     ips_list = iocs.get("ips", [])
-    if ips_list:
+    if ip_enrichment:
+        h = doc.add_paragraph()
+        h.paragraph_format.space_after = Pt(6)
+        run = h.add_run("Adresses IP — Enrichissement")
+        run.bold = True
+        run.font.size = Pt(12)
+        run.font.color.rgb = STEEL
+        ip_rows = [["IP (defanged)", "Geo / Provider", "Risque", "Threat Intel"]]
+        for ip_e in ip_enrichment[:10]:
+            ip_str = _defang_ip(ip_e.get("ip", ""))
+            geo = ip_e.get("geo", {})
+            geo_str = ""
+            if geo.get("country"):
+                geo_str = f"{geo.get('city', '')}, {geo['country']}" if geo.get('city') else geo['country']
+            provider = ip_e.get("provider", "")
+            if provider:
+                geo_str = f"{geo_str} ({provider})" if geo_str else provider
+            if not geo_str:
+                geo_str = "Privee" if ip_e.get("is_private") else "—"
+            risk_ind = ip_e.get("risk_indicators", [])
+            risk_str = "; ".join(risk_ind[:2]) if risk_ind else "—"
+            abuse = ip_e.get("abuse", {})
+            vt = ip_e.get("vt", {})
+            ti_parts = []
+            if abuse.get("abuse_score"):
+                ti_parts.append(f"Abuse: {abuse['abuse_score']}%")
+            if vt.get("malicious"):
+                ti_parts.append(f"VT: {vt['malicious']} det.")
+            ti_str = ", ".join(ti_parts) if ti_parts else "—"
+            ip_rows.append([ip_str, geo_str, risk_str, ti_str])
+        _grid_table(ip_rows)
+        doc.add_paragraph()
+    elif ips_list:
         h = doc.add_paragraph()
         h.paragraph_format.space_after = Pt(6)
         run = h.add_run("Adresses IP")
@@ -1273,10 +1501,195 @@ def generate_docx_report(analysis: dict) -> bytes:
             doc.add_paragraph()
 
     # ════════════════════════════════════════
-    # 5. MITRE ATT&CK MAPPING
+    # N. WHOIS DOMAINE EXPEDITEUR
+    # ════════════════════════════════════════
+    whois_data = analysis.get("whois", {})
+    if whois_data and not whois_data.get("error"):
+        doc.add_page_break()
+        dsec += 1
+        _section("WHOIS DOMAINE EXPEDITEUR", str(dsec))
+
+        if whois_data.get("suspicious_age"):
+            age_days = whois_data.get("domain_age_days", 0)
+            alert_t = doc.add_table(rows=1, cols=1)
+            alert_t.alignment = WD_TABLE_ALIGNMENT.CENTER
+            ac = alert_t.rows[0].cells[0]
+            _set_cell_bg(ac, "C0392B")
+            p = ac.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.space_before = Pt(8)
+            run = p.add_run(f"ALERTE : Domaine cree il y a {age_days} jours seulement")
+            run.font.size = Pt(11)
+            run.font.color.rgb = WHITE
+            run.bold = True
+            doc.add_paragraph()
+
+        _kv_table([
+            ("Domaine", _defang_domain(whois_data.get("domain", ""))),
+            ("Registrar", whois_data.get("registrar", "N/A") or "N/A"),
+            ("Date de creation", whois_data.get("creation_date", "N/A") or "N/A"),
+            ("Date d'expiration", whois_data.get("expiration_date", "N/A") or "N/A"),
+            ("Age du domaine", f"{whois_data.get('domain_age_days', 'N/A')} jours" if whois_data.get('domain_age_days') is not None else "N/A"),
+            ("Organisation", whois_data.get("org", "N/A") or "N/A"),
+            ("Pays", whois_data.get("country", "N/A") or "N/A"),
+            ("Serveurs DNS", ", ".join(whois_data.get("name_servers", [])) or "N/A"),
+        ])
+
+    # ════════════════════════════════════════
+    # N. ANALYSE D'IMPACT
+    # ════════════════════════════════════════
+    impact = analysis.get("impact_analysis", {})
+    victim_scenario = impact.get("victim_scenario", [])
+    business_impact_list = impact.get("business_impact", [])
+    impact_response = impact.get("response_actions", [])
+    attack_class = impact.get("attack_classification", {})
+
+    if victim_scenario or business_impact_list:
+        doc.add_page_break()
+        dsec += 1
+        _section("ANALYSE D'IMPACT", str(dsec))
+
+        # Attack classification
+        if attack_class:
+            p = doc.add_paragraph()
+            run = p.add_run("Type d'attaque : ")
+            run.bold = True
+            run.font.size = Pt(10)
+            run = p.add_run(attack_class.get("type", "N/A"))
+            run.font.size = Pt(10)
+            p = doc.add_paragraph()
+            run = p.add_run("Vecteur : ")
+            run.bold = True
+            run.font.size = Pt(10)
+            run = p.add_run(attack_class.get("vector", "N/A"))
+            run.font.size = Pt(10)
+            p = doc.add_paragraph()
+            run = p.add_run("Objectif : ")
+            run.bold = True
+            run.font.size = Pt(10)
+            run = p.add_run(attack_class.get("objective", "N/A"))
+            run.font.size = Pt(10)
+            doc.add_paragraph()
+
+        # Victim scenario
+        if victim_scenario:
+            h = doc.add_paragraph()
+            h.paragraph_format.space_after = Pt(6)
+            run = h.add_run("Scenario d'attaque — Point de vue victime")
+            run.bold = True
+            run.font.size = Pt(12)
+            run.font.color.rgb = STEEL
+            _note("Reconstitution des etapes si la victime avait interagi avec l'email.")
+            doc.add_paragraph()
+            for i, step in enumerate(victim_scenario):
+                step_text = step if isinstance(step, str) else step.get("description", str(step))
+                p = doc.add_paragraph()
+                p.paragraph_format.space_after = Pt(4)
+                run = p.add_run(f"Etape {i+1} — ")
+                run.bold = True
+                run.font.size = Pt(10)
+                run.font.color.rgb = ACCENT
+                run = p.add_run(step_text)
+                run.font.size = Pt(10)
+                run.font.color.rgb = TEXT_BODY
+
+        # Business impact
+        if business_impact_list:
+            doc.add_paragraph()
+            h = doc.add_paragraph()
+            h.paragraph_format.space_after = Pt(6)
+            run = h.add_run("Impact metier potentiel")
+            run.bold = True
+            run.font.size = Pt(12)
+            run.font.color.rgb = STEEL
+            for bi in business_impact_list:
+                bi_text = bi if isinstance(bi, str) else str(bi)
+                bp = doc.add_paragraph(bi_text, style='List Bullet')
+                for r in bp.runs:
+                    r.font.size = Pt(10)
+
+        # Response actions
+        if impact_response:
+            doc.add_paragraph()
+            h = doc.add_paragraph()
+            h.paragraph_format.space_after = Pt(6)
+            run = h.add_run("Actions de reponse recommandees")
+            run.bold = True
+            run.font.size = Pt(12)
+            run.font.color.rgb = STEEL
+            for i, action in enumerate(impact_response):
+                action_text = action if isinstance(action, str) else str(action)
+                p = doc.add_paragraph()
+                p.paragraph_format.space_after = Pt(3)
+                run = p.add_run(f"{i+1}. ")
+                run.bold = True
+                run.font.size = Pt(10)
+                run = p.add_run(action_text)
+                run.font.size = Pt(10)
+
+    # ════════════════════════════════════════
+    # N. SANDBOX URL SCREENSHOTS
+    # ════════════════════════════════════════
+    sandbox = analysis.get("url_sandbox", {})
+    sandbox_results = sandbox.get("results", [])
+    sandbox_with_screenshots = [r for r in sandbox_results if r.get("screenshot_b64")]
+    if sandbox_with_screenshots:
+        import base64
+        from docx.shared import Inches
+
+        doc.add_page_break()
+        dsec += 1
+        _section("SANDBOX — CAPTURES URL", str(dsec))
+        _note(f"{len(sandbox_with_screenshots)} URL(s) capturee(s) en sandbox Chromium.")
+        doc.add_paragraph()
+
+        for sr in sandbox_with_screenshots:
+            url_display = _defang_url(sr.get("url", ""))
+            p = doc.add_paragraph()
+            run = p.add_run("URL : ")
+            run.bold = True
+            run.font.size = Pt(10)
+            run = p.add_run(url_display[:80])
+            run.font.size = Pt(9)
+            run.font.name = 'Courier New'
+
+            final_url = sr.get("final_url", "")
+            if final_url and final_url != sr.get("url", ""):
+                p = doc.add_paragraph()
+                run = p.add_run("Redirection : ")
+                run.bold = True
+                run.font.size = Pt(10)
+                run = p.add_run(_defang_url(final_url)[:80])
+                run.font.size = Pt(9)
+                run.font.name = 'Courier New'
+
+            try:
+                img_data = base64.b64decode(sr["screenshot_b64"])
+                img_buf = io.BytesIO(img_data)
+                doc.add_picture(img_buf, width=Inches(5.5))
+            except Exception:
+                _note("[Capture non affichable]")
+            doc.add_paragraph()
+
+    # ════════════════════════════════════════
+    # N. MITRE ATT&CK MAPPING
     # ════════════════════════════════════════
     mitre = ai.get("mitre_techniques", []) if ai else []
     tactics = ai.get("social_engineering_tactics", []) if ai else []
+    # Merge MITRE from impact_analysis
+    impact_mitre = impact.get("mitre_attack", []) if impact else []
+    if impact_mitre:
+        existing_ids = {m.get("id") for m in mitre}
+        for im in impact_mitre:
+            im_id = im.get("id", im.get("technique_id", ""))
+            if im_id and im_id not in existing_ids:
+                mitre.append({
+                    "id": im_id,
+                    "name": im.get("name", im.get("technique", "")),
+                    "tactic": im.get("tactic", ""),
+                    "relevance": im.get("relevance", im.get("description", "")),
+                })
+                existing_ids.add(im_id)
     if mitre or tactics:
         doc.add_page_break()
         dsec += 1
