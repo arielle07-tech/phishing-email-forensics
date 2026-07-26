@@ -2424,7 +2424,6 @@ function createTicketFromAnalysis(analysisData, historyId) {
 
   // ── Build attack narrative (victim scenario) ──
   let attackNarrative = '';
-  const steps = impact.victim_scenario || [];
   if (steps.length) {
     attackNarrative = steps.map(s => `Etape ${s.step} — ${s.action}: ${s.description}`).join('\n\n');
   }
