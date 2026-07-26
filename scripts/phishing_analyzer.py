@@ -1395,16 +1395,45 @@ class PhishingAnalyzer:
 
     # ── Whois du domaine expediteur ──
 
+    @staticmethod
+    def _extract_root_domain(domain: str) -> str:
+        """Extrait le domaine racine enregistrable (ex: sub.firebaseapp.com → firebaseapp.com)."""
+        # Liste des suffixes multi-niveaux connus (PaaS, hosting, etc.)
+        multi_suffixes = [
+            '.co.uk', '.co.jp', '.co.kr', '.co.in', '.co.za', '.co.nz',
+            '.com.au', '.com.br', '.com.cn', '.com.mx', '.com.ar',
+            '.org.uk', '.net.au', '.ac.uk', '.gov.uk',
+            '.firebaseapp.com', '.web.app', '.herokuapp.com',
+            '.azurewebsites.net', '.cloudfront.net', '.amazonaws.com',
+            '.pages.dev', '.netlify.app', '.vercel.app', '.onrender.com',
+            '.appspot.com', '.blogspot.com', '.github.io', '.gitlab.io',
+        ]
+        domain_lower = domain.lower()
+        for suffix in multi_suffixes:
+            if domain_lower.endswith(suffix):
+                # Pour les PaaS (firebaseapp.com, herokuapp.com), query le domaine parent
+                base = suffix.lstrip('.')
+                return base
+
+        # Sinon extraire les 2 derniers segments (example.com)
+        parts = domain.split('.')
+        if len(parts) > 2:
+            return '.'.join(parts[-2:])
+        return domain
+
     def _whois_from_domain(self):
         """Recherche les informations Whois du domaine From."""
         from_addr = self.report.get("metadata", {}).get("from", "")
         match = re.search(r'@([\w\.-]+)', from_addr)
         if not match:
             return
-        domain = match.group(1).lower()
+        full_domain = match.group(1).lower()
+        root_domain = self._extract_root_domain(full_domain)
 
         whois_info = {
-            "domain": domain,
+            "domain": full_domain,
+            "root_domain": root_domain,
+            "is_subdomain": full_domain != root_domain,
             "registrar": None,
             "creation_date": None,
             "expiration_date": None,
@@ -1414,12 +1443,28 @@ class PhishingAnalyzer:
             "org": None,
             "domain_age_days": None,
             "suspicious_age": False,
+            "hosting_platform": None,
             "error": None
         }
 
+        # Détecter les plateformes d'hébergement (indicateur de phishing)
+        hosting_platforms = {
+            'firebaseapp.com': 'Google Firebase', 'web.app': 'Google Firebase',
+            'herokuapp.com': 'Heroku', 'azurewebsites.net': 'Microsoft Azure',
+            'netlify.app': 'Netlify', 'vercel.app': 'Vercel',
+            'pages.dev': 'Cloudflare Pages', 'onrender.com': 'Render',
+            'appspot.com': 'Google App Engine', 'blogspot.com': 'Blogger',
+            'github.io': 'GitHub Pages', 'gitlab.io': 'GitLab Pages',
+        }
+        for suffix, platform in hosting_platforms.items():
+            if full_domain.endswith(suffix):
+                whois_info["hosting_platform"] = platform
+                break
+
         try:
             import whois
-            w = whois.whois(domain)
+            print(f"[WHOIS] Query: {root_domain}" + (f" (sous-domaine de {full_domain})" if full_domain != root_domain else ""))
+            w = whois.whois(root_domain)
 
             if w.registrar:
                 whois_info["registrar"] = str(w.registrar)
@@ -1451,13 +1496,13 @@ class PhishingAnalyzer:
             if w.org:
                 whois_info["org"] = str(w.org)
 
-            print(f"[WHOIS] {domain} — registrar: {whois_info['registrar']}, age: {whois_info['domain_age_days']}j")
+            print(f"[WHOIS] {root_domain} — registrar: {whois_info['registrar']}, age: {whois_info['domain_age_days']}j")
         except ImportError:
             whois_info["error"] = "Module python-whois non installe"
             print("[WHOIS] Module python-whois non disponible — pip install python-whois")
         except Exception as e:
             whois_info["error"] = str(e)
-            print(f"[WHOIS] Erreur pour {domain}: {e}")
+            print(f"[WHOIS] Erreur pour {root_domain}: {e}")
 
         self.report["whois"] = whois_info
 

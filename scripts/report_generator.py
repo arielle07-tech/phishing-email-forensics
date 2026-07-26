@@ -728,6 +728,12 @@ def generate_pdf_report(analysis: dict) -> bytes:
 
         whois_rows = [
             ["Domaine", _safe(_defang_domain(whois_data.get("domain", "")))],
+        ]
+        if whois_data.get("is_subdomain") and whois_data.get("root_domain"):
+            whois_rows.append(["Domaine racine", _safe(_defang_domain(whois_data["root_domain"]))])
+        if whois_data.get("hosting_platform"):
+            whois_rows.append(["Plateforme", _safe(whois_data["hosting_platform"]) + " (hebergement gratuit)"])
+        whois_rows.extend([
             ["Registrar", _safe(whois_data.get("registrar", "N/A") or "N/A")],
             ["Date de creation", _safe(whois_data.get("creation_date", "N/A") or "N/A")],
             ["Date d'expiration", _safe(whois_data.get("expiration_date", "N/A") or "N/A")],
@@ -735,7 +741,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
             ["Organisation", _safe(whois_data.get("org", "N/A") or "N/A")],
             ["Pays", _safe(whois_data.get("country", "N/A") or "N/A")],
             ["Serveurs DNS", _safe(", ".join(whois_data.get("name_servers", [])) or "N/A")],
-        ]
+        ])
         story.append(_pdf_info_table_v2(whois_rows, NAVY, CONTENT_W))
 
     # ════════════════════════════════════════════════════
@@ -1524,8 +1530,12 @@ def generate_docx_report(analysis: dict) -> bytes:
             run.bold = True
             doc.add_paragraph()
 
-        _kv_table([
-            ("Domaine", _defang_domain(whois_data.get("domain", ""))),
+        whois_kv = [("Domaine", _defang_domain(whois_data.get("domain", "")))]
+        if whois_data.get("is_subdomain") and whois_data.get("root_domain"):
+            whois_kv.append(("Domaine racine", _defang_domain(whois_data["root_domain"])))
+        if whois_data.get("hosting_platform"):
+            whois_kv.append(("Plateforme", f"{whois_data['hosting_platform']} (hebergement gratuit)"))
+        whois_kv.extend([
             ("Registrar", whois_data.get("registrar", "N/A") or "N/A"),
             ("Date de creation", whois_data.get("creation_date", "N/A") or "N/A"),
             ("Date d'expiration", whois_data.get("expiration_date", "N/A") or "N/A"),
@@ -1534,6 +1544,7 @@ def generate_docx_report(analysis: dict) -> bytes:
             ("Pays", whois_data.get("country", "N/A") or "N/A"),
             ("Serveurs DNS", ", ".join(whois_data.get("name_servers", [])) or "N/A"),
         ])
+        _kv_table(whois_kv)
 
     # ════════════════════════════════════════
     # N. ANALYSE D'IMPACT

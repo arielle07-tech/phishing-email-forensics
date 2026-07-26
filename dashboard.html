@@ -1376,8 +1376,22 @@ function renderWhois(a) {
     else { ageColor = 'var(--success)'; ageLabel = 'Etabli'; }
   }
 
-  var html = '<table class="info-table">';
-  html += '<tr><td>Domaine</td><td><span style="font-family:\'JetBrains Mono\',monospace;color:var(--accent)">' + esc(w.domain) + '</span></td></tr>';
+  var html = '';
+
+  // Alerte plateforme d'hébergement gratuit
+  if (w.hosting_platform) {
+    html += '<div style="margin-bottom:10px;padding:8px 12px;background:var(--warning-dim,rgba(227,179,65,.1));border:1px solid rgba(227,179,65,.25);border-radius:6px;font-size:12px;color:var(--warning)">';
+    html += '&#x26A0; Domaine heberge sur <b>' + esc(w.hosting_platform) + '</b> — plateforme gratuite souvent exploitee pour le phishing';
+    html += '</div>';
+  }
+
+  html += '<table class="info-table">';
+  html += '<tr><td>Domaine</td><td><span style="font-family:\'JetBrains Mono\',monospace;color:var(--accent)">' + esc(w.domain) + '</span>';
+  if (w.is_subdomain && w.root_domain) {
+    html += ' <span style="font-size:11px;color:var(--text3)">(sous-domaine de ' + esc(w.root_domain) + ')</span>';
+  }
+  html += '</td></tr>';
+  if (w.hosting_platform) html += '<tr><td>Plateforme</td><td><span style="color:var(--warning);font-weight:600">' + esc(w.hosting_platform) + '</span></td></tr>';
   if (w.registrar) html += '<tr><td>Registrar</td><td>' + esc(w.registrar) + '</td></tr>';
   if (w.creation_date) {
     html += '<tr><td>Date de creation</td><td>' + esc(w.creation_date);
