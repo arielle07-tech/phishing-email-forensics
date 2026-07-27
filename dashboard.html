@@ -435,31 +435,6 @@
   #lightbox-overlay .lightbox-close:hover { background:rgba(255,255,255,.25); }
 
   /* ── Light theme ── */
-  [data-theme="light"] {
-    --bg: #2b303a; --bg2: #333842; --bg3: #3d434f; --bg4: #4a5160;
-    --accent: #5b9ef5; --accent-dim: rgba(91,158,245,.12);
-    --danger: #f85149; --danger-dim: rgba(248,81,73,.12);
-    --warning: #e3b341; --warning-dim: rgba(227,179,65,.12);
-    --success: #3fb950; --success-dim: rgba(63,185,80,.12);
-    --info: #58a6ff;
-    --text: #d4d8e0; --text2: #9ba3af; --text3: #6e7681;
-    --border: #444c56; --border2: #3d434f;
-  }
-  [data-theme="light"] .header { background: #333842; border-bottom: 1px solid #444c56; }
-  [data-theme="light"] .tab { color: #9ba3af; }
-  [data-theme="light"] .tab.active { color: #5b9ef5; border-bottom-color: #5b9ef5; }
-  [data-theme="light"] .btn { background: #3d434f; color: #d4d8e0; border-color: #444c56; }
-  [data-theme="light"] .btn:hover { background: #4a5160; }
-  [data-theme="light"] .btn-primary { background: #5b9ef5; color: #fff; border-color: #5b9ef5; }
-  [data-theme="light"] .panel { background: #333842; border-color: #444c56; }
-  [data-theme="light"] .panel:hover { border-color: #5b9ef5; }
-  [data-theme="light"] .metric-card { background: #333842; border-color: #444c56; }
-  [data-theme="light"] .stat-card { background: #333842; border-color: #444c56; }
-  [data-theme="light"] .loading-overlay { background: rgba(43,48,58,.9); }
-  [data-theme="light"] .ticket-card { background: #3d434f; border-color: #444c56; }
-  [data-theme="light"] .ticket-column { background: #2b303a; }
-  [data-theme="light"] .info-table td:first-child { background: #3d434f; }
-  [data-theme="light"] .panel-header { border-bottom-color: #444c56; }
 
   /* Leaflet dark popup */
   .dark-popup .leaflet-popup-content-wrapper { background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.5); }
@@ -493,7 +468,6 @@
     <button class="btn" onclick="downloadIncidentDOCX()" id="btnIncidentDOCX" style="display:none">Rapport Word</button>
     <button class="btn btn-primary" onclick="createTicketFromCurrent()" id="btnCreateTicket" style="display:none">Creer ticket</button>
     <button class="btn btn-primary" onclick="document.getElementById('emlInput').click()">Importer fichier</button>
-    <button class="btn" onclick="toggleTheme()" id="btnThemeToggle" title="Theme clair/sombre" style="padding:7px 10px;font-size:14px">&#x263E;</button>
     <button class="btn" onclick="openSettingsModal()" id="btnSettings" title="Integrations" style="padding:7px 10px">&#x2699;</button>
   </div>
 </div>
