@@ -30,9 +30,12 @@ Thumbs.db
 # Docker
 *.log
 
+# Local scripts & notes
+sync_and_deploy.bat
+post_linkedin.md
+
 # Test emails / samples
 Analyse Mail Test/
 *.msg
 *.eml
 *.zip
-phishing_pot/ 
