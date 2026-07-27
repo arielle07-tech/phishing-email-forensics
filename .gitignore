@@ -33,9 +33,13 @@ Thumbs.db
 # Local scripts & notes
 sync_and_deploy.bat
 post_linkedin.md
+docker-compose.override.yml
 
 # Test emails / samples
 Analyse Mail Test/
 *.msg
-*.eml
 *.zip
+
+# EML files (sauf le demo)
+*.eml
+!samples/demo_phishing.eml
