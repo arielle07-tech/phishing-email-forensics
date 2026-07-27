@@ -1025,35 +1025,67 @@ function renderTopMitre() {
   h.forEach(e => {
     const a = e.data || {};
     const ai = a.ai_analysis || {};
+    let found = false;
+
+    // Source 1: ai_analysis.mitre_techniques
     const techniques = ai.mitre_techniques || [];
     techniques.forEach(t => {
       const tid = t.id || t.technique_id || '';
       const name = t.name || t.technique || tid;
-      if (tid) {
-        techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
-        techniqueNames[tid] = name;
-      }
+      if (tid) { techniqueCount[tid] = (techniqueCount[tid] || 0) + 1; techniqueNames[tid] = name; found = true; }
     });
-    // Also check enrichment mitre
+
+    // Source 2: enrichment.mitre_mapping
     const enrich = a.enrichment || {};
     (enrich.mitre_mapping || []).forEach(t => {
       const tid = t.technique_id || t.id || '';
       const name = t.technique_name || t.name || tid;
-      if (tid) {
-        techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
-        if (!techniqueNames[tid]) techniqueNames[tid] = name;
-      }
+      if (tid) { techniqueCount[tid] = (techniqueCount[tid] || 0) + 1; if (!techniqueNames[tid]) techniqueNames[tid] = name; found = true; }
     });
-    // Also check impact_analysis mitre_attack
+
+    // Source 3: impact_analysis.mitre_attack
     const impact = a.impact_analysis || {};
     (impact.mitre_attack || []).forEach(t => {
       const tid = t.id || t.technique_id || '';
       const name = t.name || t.technique || tid;
-      if (tid) {
-        techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
-        if (!techniqueNames[tid]) techniqueNames[tid] = name;
-      }
+      if (tid) { techniqueCount[tid] = (techniqueCount[tid] || 0) + 1; if (!techniqueNames[tid]) techniqueNames[tid] = name; found = true; }
     });
+
+    // Fallback: infer MITRE from IOCs if no explicit source
+    if (!found && a.iocs) {
+      const iocs = a.iocs;
+      const atts = a.attachments || [];
+      const score = (a.verdict || {}).score || 0;
+      if (score < 20) return; // skip low-risk
+
+      // T1566.002 — Phishing: Spearphishing Link
+      if ((iocs.urls || []).length > 0) {
+        const tid = 'T1566.002'; techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
+        techniqueNames[tid] = 'Phishing: Spearphishing Link';
+      }
+      // T1566.001 — Phishing: Spearphishing Attachment
+      if (atts.some(att => att.suspicious_extension)) {
+        const tid = 'T1566.001'; techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
+        techniqueNames[tid] = 'Phishing: Spearphishing Attachment';
+      }
+      // T1078 — Valid Accounts (credential harvesting keywords)
+      const credKws = ['password', 'mot de passe', 'verify', 'confirm', 'login', 'signin', 'account'];
+      if ((iocs.phishing_keywords || []).some(k => credKws.some(ck => k.toLowerCase().includes(ck)))) {
+        const tid = 'T1078'; techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
+        techniqueNames[tid] = 'Valid Accounts';
+      }
+      // T1204.001 — User Execution: Malicious Link
+      if ((iocs.urls || []).some(u => u.suspicious_tld || u.ip_based || u.mismatched_display)) {
+        const tid = 'T1204.001'; techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
+        techniqueNames[tid] = 'User Execution: Malicious Link';
+      }
+      // T1036 — Masquerading (impersonation)
+      const imp = (ai.impersonation || {});
+      if (imp.impersonated_entity && imp.impersonated_entity !== 'N/A') {
+        const tid = 'T1036'; techniqueCount[tid] = (techniqueCount[tid] || 0) + 1;
+        techniqueNames[tid] = 'Masquerading';
+      }
+    }
   });
 
   const top = Object.entries(techniqueCount).sort((a,b) => b[1]-a[1]).slice(0, 5);
@@ -2236,21 +2268,6 @@ function loadDemoData() {
   processReport(demo);
 }
 
-// ══════════ THEME ══════════
-function toggleTheme() {
-  var current = document.documentElement.getAttribute('data-theme') || 'dark';
-  var next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('phishing_theme', next);
-  document.getElementById('btnThemeToggle').innerHTML = next === 'dark' ? '&#x263E;' : '&#x2600;';
-}
-// Restore saved theme
-(function() {
-  var saved = localStorage.getItem('phishing_theme') || 'dark';
-  document.documentElement.setAttribute('data-theme', saved);
-  var btn = document.getElementById('btnThemeToggle');
-  if (btn) btn.innerHTML = saved === 'dark' ? '&#x263E;' : '&#x2600;';
-})();
 
 // ══════════ INIT ══════════
 updateOverview();
