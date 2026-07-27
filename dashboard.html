@@ -1375,6 +1375,13 @@ function renderWhois(a) {
   if (!w || w.error === 'Module python-whois non installe') { el.style.display='none'; return; }
   el.style.display='';
 
+  // Clean up raw "No match" errors from older analyses
+  if (w.error && (w.error.includes('No match') || w.error.toLowerCase().includes('no match'))) {
+    w.not_found = true;
+    w.suspicious_domain = true;
+    w.error = null;
+  }
+
   var ageColor = 'var(--success)';
   var ageLabel = '';
   if (w.domain_age_days !== null) {
@@ -1414,10 +1421,19 @@ function renderWhois(a) {
   if (w.name_servers && w.name_servers.length) {
     html += '<tr><td>Serveurs DNS</td><td>' + w.name_servers.map(function(ns) { return '<span style="display:inline-block;padding:2px 6px;background:var(--bg);border-radius:3px;font-size:11px;font-family:monospace;margin:1px">' + esc(ns) + '</span>'; }).join(' ') + '</td></tr>';
   }
+  if (w.not_found) {
+    html += '<tr><td>Statut</td><td style="color:var(--danger);font-weight:600">Domaine introuvable dans les registres publics</td></tr>';
+  }
   if (w.error) html += '<tr><td>Erreur</td><td style="color:var(--warning)">' + esc(w.error) + '</td></tr>';
   html += '</table>';
 
-  if (w.suspicious_age) {
+  if (w.not_found || w.suspicious_domain) {
+    html += '<div style="margin-top:10px;padding:8px 12px;background:var(--danger-dim);border:1px solid rgba(248,81,73,.2);border-radius:6px;font-size:12px;color:var(--danger)">';
+    html += '&#x26A0; Domaine introuvable — probablement un domaine jetable cree pour cette campagne de phishing puis supprime. C\'est un indicateur fort de malveillance.';
+    html += '</div>';
+  }
+
+  if (w.suspicious_age && !w.not_found) {
     html += '<div style="margin-top:10px;padding:8px 12px;background:var(--danger-dim);border:1px solid rgba(248,81,73,.2);border-radius:6px;font-size:12px;color:var(--danger)">';
     html += '&#x26A0; Domaine cree il y a moins de 90 jours — indicateur fort de phishing';
     html += '</div>';

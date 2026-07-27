@@ -1496,13 +1496,28 @@ class PhishingAnalyzer:
             if w.org:
                 whois_info["org"] = str(w.org)
 
-            print(f"[WHOIS] {root_domain} — registrar: {whois_info['registrar']}, age: {whois_info['domain_age_days']}j")
+            # If whois returned nothing useful, mark as not found
+            if not w.registrar and not w.creation_date and not w.name_servers:
+                whois_info["error"] = None
+                whois_info["not_found"] = True
+                whois_info["suspicious_domain"] = True
+                print(f"[WHOIS] {root_domain} — aucune donnee trouvee (domaine probablement jetable ou supprime)")
+            else:
+                print(f"[WHOIS] {root_domain} — registrar: {whois_info['registrar']}, age: {whois_info['domain_age_days']}j")
         except ImportError:
             whois_info["error"] = "Module python-whois non installe"
             print("[WHOIS] Module python-whois non disponible — pip install python-whois")
         except Exception as e:
-            whois_info["error"] = str(e)
-            print(f"[WHOIS] Erreur pour {root_domain}: {e}")
+            error_str = str(e)
+            # Clean up verbose VeriSign/registry "No match" errors
+            if 'No match' in error_str or 'no match' in error_str.lower():
+                whois_info["error"] = None
+                whois_info["not_found"] = True
+                whois_info["suspicious_domain"] = True
+                print(f"[WHOIS] {root_domain} — domaine introuvable dans les registres (suspect)")
+            else:
+                whois_info["error"] = error_str
+                print(f"[WHOIS] Erreur pour {root_domain}: {e}")
 
         self.report["whois"] = whois_info
 
