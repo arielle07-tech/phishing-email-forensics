@@ -669,18 +669,24 @@
     <button class="btn btn-sm btn-primary" onclick="openNewTicketModal()">+ Nouveau ticket</button>
   </div>
 
-  <div class="ticket-board">
-    <div class="ticket-column">
-      <div class="ticket-col-header" style="border-top:3px solid var(--danger)">Ouvert <span class="col-count" id="col-open-count">0</span></div>
-      <div class="ticket-col-body" id="col-open"></div>
-    </div>
-    <div class="ticket-column">
-      <div class="ticket-col-header" style="border-top:3px solid var(--warning)">En cours <span class="col-count" id="col-progress-count">0</span></div>
-      <div class="ticket-col-body" id="col-progress"></div>
-    </div>
-    <div class="ticket-column">
-      <div class="ticket-col-header" style="border-top:3px solid var(--success)">Ferme <span class="col-count" id="col-closed-count">0</span></div>
-      <div class="ticket-col-body" id="col-closed"></div>
+  <div class="panel">
+    <div class="panel-body" style="padding:0">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th onclick="sortTickets('id')">ID &#x25B4;&#x25BE;</th>
+            <th onclick="sortTickets('date')">Date &#x25B4;&#x25BE;</th>
+            <th onclick="sortTickets('title')">Sujet</th>
+            <th onclick="sortTickets('priority')">Priorite &#x25B4;&#x25BE;</th>
+            <th onclick="sortTickets('status')">Statut &#x25B4;&#x25BE;</th>
+            <th onclick="sortTickets('assignee')">Assigne</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="ticketTableBody">
+          <tr><td colspan="7" class="empty-state">Aucun ticket</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </div>
@@ -2502,11 +2508,17 @@ function resetTicketFilters() {
   renderTicketBoard();
 }
 
+let ticketSortCol = 'date';
+let ticketSortDir = -1;
+
+function sortTickets(col) {
+  if (ticketSortCol === col) ticketSortDir *= -1;
+  else { ticketSortCol = col; ticketSortDir = -1; }
+  renderTicketBoard();
+}
+
 function renderTicketBoard() {
   const filtered = getFilteredTickets();
-  const open = filtered.filter(t => t.status === 'open');
-  const progress = filtered.filter(t => t.status === 'in_progress');
-  const closed = filtered.filter(t => t.status === 'closed');
 
   // Stats
   document.getElementById('ts-total').textContent = tickets.length;
@@ -2514,15 +2526,30 @@ function renderTicketBoard() {
   document.getElementById('ts-progress').textContent = tickets.filter(t => t.status === 'in_progress').length;
   document.getElementById('ts-closed').textContent = tickets.filter(t => t.status === 'closed').length;
 
-  // Column counts
-  document.getElementById('col-open-count').textContent = open.length;
-  document.getElementById('col-progress-count').textContent = progress.length;
-  document.getElementById('col-closed-count').textContent = closed.length;
+  // Sort
+  const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+  const statusOrder = { open: 3, in_progress: 2, closed: 1 };
+  filtered.sort((a, b) => {
+    let va, vb;
+    if (ticketSortCol === 'id') { va = a.id; vb = b.id; }
+    else if (ticketSortCol === 'date') { va = a.created || ''; vb = b.created || ''; }
+    else if (ticketSortCol === 'title') { va = (a.title || '').toLowerCase(); vb = (b.title || '').toLowerCase(); }
+    else if (ticketSortCol === 'priority') { va = priorityOrder[a.priority] || 0; vb = priorityOrder[b.priority] || 0; }
+    else if (ticketSortCol === 'status') { va = statusOrder[a.status] || 0; vb = statusOrder[b.status] || 0; }
+    else if (ticketSortCol === 'assignee') { va = (a.assignee || '').toLowerCase(); vb = (b.assignee || '').toLowerCase(); }
+    else { va = 0; vb = 0; }
+    if (va < vb) return -ticketSortDir;
+    if (va > vb) return ticketSortDir;
+    return 0;
+  });
 
-  // Render cards
-  document.getElementById('col-open').innerHTML = open.map(renderTicketCard).join('') || '<div class="empty-state">Aucun ticket</div>';
-  document.getElementById('col-progress').innerHTML = progress.map(renderTicketCard).join('') || '<div class="empty-state">Aucun ticket</div>';
-  document.getElementById('col-closed').innerHTML = closed.map(renderTicketCard).join('') || '<div class="empty-state">Aucun ticket</div>';
+  // Render table rows
+  const tbody = document.getElementById('ticketTableBody');
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Aucun ticket</td></tr>';
+  } else {
+    tbody.innerHTML = filtered.map(renderTicketRow).join('');
+  }
 
   // Update assignee filter dropdown
   const assignees = [...new Set(tickets.map(t => t.assignee).filter(Boolean))];
@@ -2534,22 +2561,22 @@ function renderTicketBoard() {
   updateTicketBadge();
 }
 
-function renderTicketCard(t) {
-  const age = getTimeAgo(t.created);
-  const commentCount = t.comments.length;
-  return `<div class="ticket-card" onclick="openTicketDetail(${t.id})">
-    <div class="ticket-card-header">
-      <span class="ticket-id">INC-${String(t.id).padStart(4,'0')}</span>
-      <span class="ticket-priority ${t.priority}">${t.priority}</span>
-    </div>
-    <div class="ticket-title">${esc(t.title.substring(0,80))}</div>
-    <div class="ticket-meta">
-      <span>${age}</span>
-      ${t.emailDate ? `<span>&#x1f4e7; ${esc(t.emailDate.substring(0,16))}</span>` : ''}
-      ${t.assignee ? `<span>&#x1f464; ${esc(t.assignee)}</span>` : ''}
-      ${commentCount ? `<span>&#x1f4ac; ${commentCount}</span>` : ''}
-    </div>
-  </div>`;
+function renderTicketRow(t) {
+  const statusLabels = { open: 'Ouvert', in_progress: 'En cours', closed: 'Ferme' };
+  const statusColors = { open: 'var(--danger)', in_progress: 'var(--warning)', closed: 'var(--success)' };
+  const dateStr = t.created ? new Date(t.created).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+  return `<tr class="clickable" onclick="openTicketDetail(${t.id})">
+    <td><span class="ticket-id">INC-${String(t.id).padStart(4,'0')}</span></td>
+    <td>${dateStr}</td>
+    <td>${esc(t.title.substring(0,80))}</td>
+    <td><span class="ticket-priority ${t.priority}">${t.priority}</span></td>
+    <td><span style="color:${statusColors[t.status] || 'var(--text3)'}">${statusLabels[t.status] || t.status}</span></td>
+    <td>${t.assignee ? esc(t.assignee) : '<span style="color:var(--text3)">—</span>'}</td>
+    <td>
+      <button class="btn btn-sm" onclick="event.stopPropagation();openTicketDetail(${t.id})">Voir</button>
+      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteTicket(${t.id})">Suppr</button>
+    </td>
+  </tr>`;
 }
 
 function getTimeAgo(dateStr) {
