@@ -1650,10 +1650,33 @@ class PhishingAnalyzer:
                 })
         elif suspicious_urls or urls:
             target_url = suspicious_urls[0]["url"] if suspicious_urls else urls[0].get("url", "")
+            try:
+                target_domain = urlparse(target_url).netloc or target_url
+            except Exception:
+                target_domain = target_url
             step2 = f"La victime clique sur le lien dans l'email"
             if has_redirect:
                 step2 += f". Le lien redirige vers une page controlee par l'attaquant"
+            elif target_domain:
+                step2 += f". Le lien pointe vers '{target_domain}'"
+                if suspicious_urls:
+                    flags = []
+                    u0 = suspicious_urls[0]
+                    if u0.get("suspicious_tld"):
+                        flags.append("TLD suspect")
+                    if u0.get("ip_based"):
+                        flags.append("URL basee sur une adresse IP")
+                    if u0.get("url_shortener"):
+                        flags.append("raccourcisseur d'URL masquant la destination reelle")
+                    if flags:
+                        step2 += f" ({', '.join(flags)})"
             steps.append({"step": 2, "action": "Clic sur lien", "description": step2, "icon": "link"})
+
+            mitre.append({
+                "tactic": "Execution",
+                "technique": "T1204.001 — User Execution: Malicious Link",
+                "description": f"La victime clique sur un lien menant vers '{target_domain}'"
+            })
 
         # Step 3: What the victim sees
         if has_fake_viewer and embedded.get("phishing_urls"):
@@ -1850,10 +1873,76 @@ class PhishingAnalyzer:
                 {"category": "Financier", "level": "CRITIQUE", "detail": "Cout de remediation, potentielle rancon"},
             ]
         else:
-            # Generic scenario
-            if steps and len(steps) < 5:
-                step5 = "L'attaquant collecte des informations sur la victime ou l'organisation pour preparer des attaques ulterieures plus ciblees"
-                steps.append({"step": len(steps) + 1, "action": "Reconnaissance", "description": step5, "icon": "eye"})
+            # Generic / link-only phishing scenario — enriched
+            next_step = len(steps) + 1
+
+            # Step 3: What happens when they click
+            if suspicious_urls or urls:
+                all_domains = list(set(
+                    urlparse(u.get("url","")).netloc for u in (suspicious_urls or urls) if urlparse(u.get("url","")).netloc
+                ))[:3]
+                nb_urls = len(suspicious_urls or urls)
+
+                step3 = "Le navigateur ouvre une page controlee par l'attaquant"
+                if all_domains:
+                    step3 += f" sur {', '.join(all_domains)}"
+                step3 += ". La page peut afficher un faux formulaire de connexion, un message urgent demandant une action immediate, ou lancer un telechargement automatique"
+
+                # Check sandbox data for more detail
+                sandbox_results = (sandbox or {}).get("results", [])
+                phishing_indicators = []
+                for sr in sandbox_results:
+                    phishing_indicators.extend(sr.get("phishing_indicators", []))
+                if phishing_indicators:
+                    step3 += f". Indicateurs de phishing detectes en sandbox : {'; '.join(list(set(phishing_indicators))[:4])}"
+
+                steps.append({"step": next_step, "action": "Page malveillante", "description": step3, "icon": "browser"})
+                next_step += 1
+
+                mitre.append({
+                    "tactic": "Collection",
+                    "technique": "T1598.003 — Phishing for Information: Spearphishing Link",
+                    "description": f"Page de collecte d'informations sur {', '.join(all_domains[:2])}"
+                })
+
+                # Step 4: Data theft / consequences
+                step4 = "Si la victime saisit des informations (identifiant, mot de passe, donnees personnelles), elles sont envoyees directement au serveur de l'attaquant"
+                if nb_urls > 1:
+                    step4 += f". {nb_urls} URLs suspectes detectees dans l'email — chaque lien peut mener a une page differente de collecte"
+                steps.append({"step": next_step, "action": "Vol de donnees", "description": step4, "icon": "key"})
+                next_step += 1
+
+                mitre.append({
+                    "tactic": "Exfiltration",
+                    "technique": "T1041 — Exfiltration Over C2 Channel",
+                    "description": "Donnees saisies par la victime transmises au serveur de l'attaquant"
+                })
+
+            # Step 5: Broader consequences
+            step_final = "Avec les informations collectees, l'attaquant peut : "
+            consequences = [
+                "acceder aux comptes de la victime et voler des donnees sensibles",
+                "envoyer des emails de phishing depuis le compte compromis (phishing en chaine)",
+                "revendre les identifiants sur le dark web",
+                "preparer des attaques plus ciblees contre l'organisation (spearphishing)"
+            ]
+            step_final += "; ".join(consequences)
+            steps.append({"step": next_step, "action": "Consequences", "description": step_final, "icon": "alert-triangle"})
+
+            mitre.append({
+                "tactic": "Impact",
+                "technique": "T1078 — Valid Accounts",
+                "description": "Utilisation potentielle des identifiants voles pour acceder aux systemes internes"
+            })
+
+            if not impact:
+                impact = [
+                    {"category": "Confidentialite", "level": "ELEVE", "detail": "Risque de vol d'identifiants et de donnees personnelles"},
+                    {"category": "Integrite", "level": "MOYEN", "detail": "L'attaquant pourrait agir au nom de la victime"},
+                    {"category": "Disponibilite", "level": "FAIBLE", "detail": "Verrouillage de compte possible si mot de passe modifie"},
+                    {"category": "Financier", "level": "MOYEN", "detail": "Risque de fraude ou d'achat non autorise"},
+                    {"category": "Reputationnel", "level": "MOYEN", "detail": "Phishing en chaine depuis le compte compromis"}
+                ]
 
         # Step 5 for fake viewer
         if has_fake_viewer and embedded.get("phishing_urls") and not has_credential_harvest:
