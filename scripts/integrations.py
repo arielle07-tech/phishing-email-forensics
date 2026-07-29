@@ -226,15 +226,15 @@ class RTIRConnector(BaseConnector):
 
     def create_ticket(self, data: dict) -> dict:
         # Map dashboard status to RT status
+        # RT crée toujours en "new" — on force l'update après création
         status_map = {"open": "open", "in_progress": "open", "closed": "resolved"}
-        rt_status = status_map.get(data.get("status", ""), "new")
+        rt_status = status_map.get(data.get("status", ""), "open")
 
         content_lines = [
             f"Queue: {data.get('queue', 'Incident Reports')}",
             f"Subject: {data.get('title', 'New Incident')}",
             f"Priority: {self._map_priority(data.get('priority', 'medium'))}",
             f"Owner: {data.get('assignee', 'Nobody')}",
-            f"Status: {rt_status}",
             f"Text: {data.get('description', '').replace(chr(10), chr(10) + ' ')}",
         ]
         content = "\n".join(content_lines)
@@ -252,11 +252,10 @@ class RTIRConnector(BaseConnector):
                 break
 
         if ticket_id:
-            # Si le statut demandé n'est pas "new", faire un update après création
-            if rt_status != "new":
-                update_content = f"Status: {rt_status}"
-                self._rt_request(f"/REST/1.0/ticket/{ticket_id}/edit",
-                                 {"content": update_content})
+            # RT crée toujours en "new" — update systématique vers le statut voulu
+            update_content = f"Status: {rt_status}"
+            self._rt_request(f"/REST/1.0/ticket/{ticket_id}/edit",
+                             {"content": update_content})
             return {
                 "id": ticket_id,
                 "url": f"{self.base_url}/Ticket/Display.html?id={ticket_id}",
@@ -267,7 +266,7 @@ class RTIRConnector(BaseConnector):
     def update_ticket(self, ticket_id: str, data: dict) -> dict:
         content_lines = []
         if "status" in data:
-            status_map = {"open": "new", "in_progress": "open", "closed": "resolved"}
+            status_map = {"open": "open", "in_progress": "open", "closed": "resolved"}
             content_lines.append(f"Status: {status_map.get(data['status'], data['status'])}")
         if "priority" in data:
             content_lines.append(f"Priority: {self._map_priority(data['priority'])}")
