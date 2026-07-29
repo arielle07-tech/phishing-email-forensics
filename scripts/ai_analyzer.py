@@ -237,6 +237,7 @@ class AIPhishingAnalyzer:
         try:
             raw_response = self._call_llm(prompt)
             ai_result = self._parse_response(raw_response)
+            ai_result = self._normalize_ai_result(ai_result)
             ai_result["_meta"] = {
                 "provider": self.provider,
                 "model": self.model,
@@ -471,6 +472,42 @@ class AIPhishingAnalyzer:
                 return data["response"]
         except Exception as e:
             raise RuntimeError(f"Ollama error: {e}. Vérifier que Ollama est lancé sur {self.base_url}")
+
+    @staticmethod
+    def _normalize_ai_result(result: dict) -> dict:
+        """Normalise les champs qui doivent être des dicts/listes.
+
+        Les LLMs renvoient parfois des strings au lieu de dicts
+        (ex: "impersonation": "Aucune" au lieu d'un dict).
+        """
+        dict_fields = {
+            "semantic_analysis": {"pretext": "N/A", "narrative": "", "target_emotion": "N/A",
+                                  "credibility_assessment": "N/A", "language_quality": "N/A"},
+            "sophistication": {"level": "N/A", "score": "N/A", "indicators": []},
+            "targeting": {"type": "N/A", "confidence": "N/A", "reasoning": ""},
+            "impersonation": {"impersonated_entity": "N/A", "impersonation_quality": "N/A", "red_flags": []},
+        }
+        list_fields = ["social_engineering_tactics", "recommended_actions", "mitre_techniques"]
+
+        for field, defaults in dict_fields.items():
+            val = result.get(field)
+            if val is None or isinstance(val, str):
+                result[field] = defaults
+            elif not isinstance(val, dict):
+                result[field] = defaults
+
+        for field in list_fields:
+            val = result.get(field)
+            if val is None or isinstance(val, str):
+                result[field] = []
+            elif isinstance(val, list):
+                # Ensure list items that should be dicts aren't strings
+                result[field] = [
+                    item if isinstance(item, dict) else {"description": str(item)}
+                    for item in val
+                ]
+
+        return result
 
     def _parse_response(self, raw: str) -> dict:
         """Parse la réponse JSON du LLM."""

@@ -99,7 +99,8 @@ def _classify_incident(analysis: dict) -> dict:
         for kw in ["verify your account", "password expired", "reset your password",
                     "confirm your identity", "vérifiez votre compte", "mot de passe expiré"]
     )
-    imp_entity = ai.get("impersonation", {}).get("impersonated_entity", "")
+    imp_raw = ai.get("impersonation", {})
+    imp_entity = imp_raw.get("impersonated_entity", "") if isinstance(imp_raw, dict) else ""
 
     if has_malicious_att:
         category = "Malware Delivery"
@@ -130,7 +131,7 @@ def _classify_incident(analysis: dict) -> dict:
         "priority": priority,
         "severity_description": severity_desc,
         "tlp": "TLP:AMBER" if score >= 45 else "TLP:GREEN",
-        "mitre_tactics": [m.get("id", "") for m in ai.get("mitre_techniques", [])],
+        "mitre_tactics": [m.get("id", "") for m in ai.get("mitre_techniques", []) if isinstance(m, dict)],
     }
 
 
@@ -950,13 +951,19 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════════════════
     if ai and not ai.get("error"):
         sem = ai.get("semantic_analysis", {})
+        sem = sem if isinstance(sem, dict) else {}
         imp = ai.get("impersonation", {})
+        imp = imp if isinstance(imp, dict) else {}
         soph = ai.get("sophistication", {})
+        soph = soph if isinstance(soph, dict) else {}
 
         if sem or imp or soph:
             story.append(PageBreak())
             story.append(_pdf_section_header_v2("A", "ANNEXE — ANALYSE IA DETAILLEE", TEXT_MUTED, CONTENT_W))
             story.append(Spacer(1, 6*mm))
+
+            ai_conf = ai.get("ai_confidence", 0)
+            ai_conf = ai_conf if isinstance(ai_conf, (int, float)) else 0
 
             ai_data = [
                 ["Emotion ciblee", _safe(sem.get("target_emotion", "N/A"))],
@@ -965,7 +972,7 @@ def generate_pdf_report(analysis: dict) -> bytes:
                 ["Qualite usurpation", f"{imp.get('impersonation_quality', 'N/A')}/10"],
                 ["Credibilite", f"{sem.get('credibility_assessment', 'N/A')}/10"],
                 ["Sophistication", f"{soph.get('level', 'N/A')} ({soph.get('score', 'N/A')}/10)"],
-                ["Confiance IA", f"{round((ai.get('ai_confidence', 0)) * 100)}%"],
+                ["Confiance IA", f"{round(ai_conf * 100)}%"],
             ]
             story.append(_pdf_info_table_v2(ai_data, ACCENT, CONTENT_W))
 
@@ -1775,8 +1782,13 @@ def generate_docx_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════
     if ai and not ai.get("error"):
         sem = ai.get("semantic_analysis", {})
+        sem = sem if isinstance(sem, dict) else {}
         imp = ai.get("impersonation", {})
+        imp = imp if isinstance(imp, dict) else {}
         soph = ai.get("sophistication", {})
+        soph = soph if isinstance(soph, dict) else {}
+        ai_conf = ai.get("ai_confidence", 0)
+        ai_conf = ai_conf if isinstance(ai_conf, (int, float)) else 0
         if sem or imp or soph:
             doc.add_page_break()
             _section("ANNEXE — ANALYSE IA DETAILLEE", "A")
@@ -1787,7 +1799,7 @@ def generate_docx_report(analysis: dict) -> bytes:
                 ("Qualite usurpation", f"{imp.get('impersonation_quality', 'N/A')}/10"),
                 ("Credibilite", f"{sem.get('credibility_assessment', 'N/A')}/10"),
                 ("Sophistication", f"{soph.get('level', 'N/A')} ({soph.get('score', 'N/A')}/10)"),
-                ("Confiance IA", f"{round(ai.get('ai_confidence', 0) * 100)}%"),
+                ("Confiance IA", f"{round(ai_conf * 100)}%"),
             ])
 
     # ════════════════════════════════════════
