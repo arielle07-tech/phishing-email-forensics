@@ -188,6 +188,43 @@
     display: inline-block; padding: 5px 18px; border-radius: 4px;
     font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
   }
+  /* ── Verdict Banner ── */
+  .verdict-banner {
+    margin: 16px 24px 0; padding: 16px 24px; border-radius: 8px;
+    display: flex; align-items: center; gap: 16px;
+    border: 1px solid; animation: bannerFadeIn .5s ease;
+  }
+  @keyframes bannerFadeIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+  .verdict-banner-icon { font-size: 32px; flex-shrink: 0; }
+  .verdict-banner-content { flex: 1; }
+  .verdict-banner-title { font-size: 18px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }
+  .verdict-banner-desc { font-size: 12px; margin-top: 4px; line-height: 1.5; opacity: .85; }
+  .verdict-banner-action { font-size: 11px; margin-top: 8px; padding: 4px 12px; border-radius: 4px; display: inline-block; font-weight: 600; letter-spacing: .3px; }
+  .verdict-banner.legitimate { background: rgba(63,185,80,.08); border-color: rgba(63,185,80,.25); color: var(--success); }
+  .verdict-banner.legitimate .verdict-banner-action { background: var(--success-dim); color: var(--success); }
+  .verdict-banner.suspect { background: rgba(210,153,34,.08); border-color: rgba(210,153,34,.25); color: var(--warning); }
+  .verdict-banner.suspect .verdict-banner-action { background: var(--warning-dim); color: var(--warning); }
+  .verdict-banner.probable { background: rgba(248,81,73,.08); border-color: rgba(248,81,73,.25); color: var(--danger); }
+  .verdict-banner.probable .verdict-banner-action { background: var(--danger-dim); color: var(--danger); }
+  .verdict-banner.confirmed { background: rgba(248,81,73,.15); border-color: rgba(248,81,73,.4); color: #ff4040; }
+  .verdict-banner.confirmed .verdict-banner-action { background: rgba(248,81,73,.2); color: #ff4040; }
+
+  /* ── Kill Chain Hypothetical Mode ── */
+  .killchain.hypothetical .kc-phase.active { background: rgba(102,102,102,.08); }
+  .killchain.hypothetical .kc-phase.active .kc-name { color: var(--text2); font-weight: 600; }
+  .killchain.hypothetical .kc-phase.active .kc-count { color: var(--text2) !important; }
+  .killchain-hypothetical-label {
+    font-size: 11px; color: var(--warning); font-weight: 600; margin-bottom: 8px;
+    padding: 4px 10px; background: var(--warning-dim); border-radius: 4px;
+    display: inline-block; letter-spacing: .3px;
+  }
+  .mitre-hypothetical-overlay {
+    position: relative;
+  }
+  .mitre-hypothetical-overlay::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(13,17,23,.3); border-radius: 6px; pointer-events: none; z-index: 1;
+  }
 
   /* ── Auth ── */
   .auth-row { display:flex; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); gap: 10px; }
@@ -1203,6 +1240,7 @@ function renderAnalysis(a) {
       <span style="flex:1"></span>
       <button class="btn btn-sm" onclick="resetAnalysisView()">&#x2190; Retour</button>
     </div>
+    <div id="verdictBanner"></div>
     <div class="overview-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:16px" id="statsCards"></div>
     <div class="panel full-width" style="margin-bottom:16px" id="killchainSection" class="hidden">
       <div class="panel-header">MITRE ATT&CK Kill Chain</div>
@@ -1231,6 +1269,7 @@ function renderAnalysis(a) {
     </div>
   `;
 
+  renderVerdictBanner(a);
   renderStats(a);
   renderVerdict(a);
   renderAuth(a);
@@ -1253,10 +1292,43 @@ function renderAnalysis(a) {
     renderAISoph(a.ai_analysis);
     renderTimeline(a);
     renderAISummary(a.ai_analysis);
-    renderAIMitre(a.ai_analysis);
+    renderAIMitre(a.ai_analysis, (a.verdict||{}).score||0);
   } else {
     renderKillChain(a);
   }
+}
+
+function renderVerdictBanner(a) {
+  const v = a.verdict||{}, score = v.score||0;
+  let cls, icon, title, desc, action;
+  if (score <= 25) {
+    cls = 'legitimate'; icon = '&#x2705;'; title = 'Légitime';
+    desc = 'Aucun indicateur significatif de phishing détecté. Cet email semble légitime.';
+    action = '&#x2192; Aucune action requise — archiver';
+  } else if (score <= 50) {
+    cls = 'suspect'; icon = '&#x26A0;&#xFE0F;'; title = 'Suspect — Investigation requise';
+    desc = 'Des indicateurs suspects ont été détectés mais ne confirment pas un phishing. Une vérification manuelle par un analyste SOC est recommandée.';
+    action = '&#x2192; Investiguer manuellement avant de conclure';
+  } else if (score <= 75) {
+    cls = 'probable'; icon = '&#x1F6A8;'; title = 'Probable Phishing';
+    desc = 'Plusieurs indicateurs convergent vers une tentative de phishing. Escalade recommandée.';
+    action = '&#x2192; Escalader — bloquer l\'expéditeur et alerter les utilisateurs';
+  } else {
+    cls = 'confirmed'; icon = '&#x1F6D1;'; title = 'Phishing Confirmé';
+    desc = 'Indicateurs techniques et comportementaux concordants. Menace avérée.';
+    action = '&#x2192; Bloquer immédiatement — quarantaine et réponse à incident';
+  }
+  document.getElementById('verdictBanner').innerHTML = `
+    <div class="verdict-banner ${cls}">
+      <div class="verdict-banner-icon">${icon}</div>
+      <div class="verdict-banner-content">
+        <div class="verdict-banner-title">${title}</div>
+        <div class="verdict-banner-desc">${desc}</div>
+        <div class="verdict-banner-action">${action}</div>
+      </div>
+      <div style="font-size:28px;font-weight:900;opacity:.6">${score}/100</div>
+    </div>
+  `;
 }
 
 function renderStats(a) {
@@ -1805,14 +1877,20 @@ function renderImpactAnalysis(a) {
 
   // ── MITRE ATT&CK mapping ──
   if (imp.mitre_attack && imp.mitre_attack.length) {
-    html += '<div style="margin-bottom:20px"><div style="font-weight:600;font-size:13px;color:var(--accent);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Mapping MITRE ATT&CK</div>';
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">';
+    const mitreScore = (a.verdict||{}).score||0;
+    const mitreHypothetical = mitreScore <= 50;
+    const mitreLabel = mitreHypothetical
+      ? '<div class="killchain-hypothetical-label" style="margin-bottom:10px">&#x26A0; Scénarios hypothétiques si phishing avéré</div>'
+      : '';
+    html += '<div style="margin-bottom:20px">' + mitreLabel + '<div style="font-weight:600;font-size:13px;color:var(--accent);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Mapping MITRE ATT&CK</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px' + (mitreHypothetical ? ';opacity:.6' : '') + '">';
     const tacticColors = {'Initial Access':'#e74c3c','Execution':'#e67e22','Collection':'#f39c12','Exfiltration':'#9b59b6','Persistence':'#8e44ad','Impact':'#c0392b','Lateral Movement':'#d35400'};
+    const greyOut = mitreHypothetical;
     imp.mitre_attack.forEach(m => {
-      const col = tacticColors[m.tactic] || 'var(--accent)';
+      const col = greyOut ? 'var(--text3)' : (tacticColors[m.tactic] || 'var(--accent)');
       html += `<div style="background:var(--bg3);border-radius:6px;padding:10px;border-top:3px solid ${col}">`;
       html += `<div style="font-size:10px;font-weight:700;color:${col};text-transform:uppercase;margin-bottom:4px">${esc(m.tactic)}</div>`;
-      html += `<div style="font-size:11px;font-weight:600;color:var(--text1);margin-bottom:4px">${esc(m.technique)}</div>`;
+      html += `<div style="font-size:11px;font-weight:600;color:${greyOut?'var(--text2)':'var(--text1)'};margin-bottom:4px">${esc(m.technique)}</div>`;
       html += `<div style="font-size:11px;color:var(--text2)">${esc(m.description)}</div>`;
       html += '</div>';
     });
@@ -1941,7 +2019,14 @@ function renderKillChain(a) {
     });
   });
 
-  document.getElementById('killchainPanel').innerHTML = '<div class="killchain">' +
+  const score = (a.verdict||{}).score||0;
+  const isHypothetical = score <= 50;
+  let headerHtml = '';
+  if (isHypothetical) {
+    headerHtml = '<div class="killchain-hypothetical-label">&#x26A0; Scénarios hypothétiques — score insuffisant pour confirmer une attaque</div>';
+  }
+
+  document.getElementById('killchainPanel').innerHTML = headerHtml + '<div class="killchain' + (isHypothetical ? ' hypothetical' : '') + '">' +
     phases.map(p => {
       const count = mitreIds.filter(id => p.techniques.some(t => id.startsWith(t))).length
         + mitreTactics.filter(t => p.tactics.some(pt => t.includes(pt))).length;
@@ -1951,9 +2036,10 @@ function renderKillChain(a) {
       if (p.id==='action' && (ha.has_password_field || ha.has_data_exfil || bodyHtml.has_password_field)) active = true;
       const details = (phaseDetails[p.id] || []).filter((v,i,a) => a.indexOf(v)===i).slice(0,3);
       const tooltip = details.length ? details.join(', ') : '';
+      const countColor = isHypothetical ? 'var(--text2)' : (active ? 'var(--danger)' : 'var(--text3)');
       return '<div class="kc-phase ' + (active?'active':'inactive') + '" title="' + esc(tooltip) + '">' +
         '<div class="kc-name">' + p.name + '</div>' +
-        '<div class="kc-count" style="color:' + (active?'var(--danger)':'var(--text3)') + '">' + (active?(count||'!'):'—') + '</div>' +
+        '<div class="kc-count" style="color:' + countColor + '">' + (active?(count||'!'):'—') + '</div>' +
         (active && details.length ? '<div style="font-size:9px;color:var(--text2);margin-top:4px;line-height:1.3">' + esc(details[0]) + '</div>' : '') +
         '</div>';
     }).join('') + '</div>';
@@ -2065,11 +2151,13 @@ function renderAISummary(ai) {
   document.getElementById('aiSummaryPanel').innerHTML=html;
 }
 
-function renderAIMitre(ai) {
+function renderAIMitre(ai, verdictScore) {
   const mitre=ai.mitre_techniques||[];
   if (!mitre.length) return;
   document.getElementById('aiMitreSection').classList.remove('hidden');
-  document.getElementById('aiMitrePanel').innerHTML=mitre.map(m=>`<div class="mitre-row"><span class="mitre-id">${esc(m.id||'')}</span><span class="mitre-name">${esc(m.name||'')}</span><span class="mitre-rel">${esc(m.relevance||'')}</span></div>`).join('');
+  const isHypo = (verdictScore||0) <= 50;
+  const labelHtml = isHypo ? '<div class="killchain-hypothetical-label" style="margin-bottom:10px">&#x26A0; Techniques hypothétiques — score insuffisant pour confirmer</div>' : '';
+  document.getElementById('aiMitrePanel').innerHTML= labelHtml + '<div style="' + (isHypo ? 'opacity:.6' : '') + '">' + mitre.map(m=>`<div class="mitre-row"><span class="mitre-id">${esc(m.id||'')}</span><span class="mitre-name">${esc(m.name||'')}</span><span class="mitre-rel">${esc(m.relevance||'')}</span></div>`).join('') + '</div>';
 }
 
 // ══════════ HISTORY ══════════

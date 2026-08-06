@@ -378,7 +378,7 @@ def integration_add_comment(ticket_id):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Phishing Forensics Web App")
-    parser.add_argument("--port", type=int, default=8080, help="Port (défaut: 8080)")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8080)), help="Port (défaut: 8080 ou $PORT)")
     parser.add_argument("--host", default="0.0.0.0", help="Host (défaut: 0.0.0.0)")
     parser.add_argument("--debug", action="store_true", help="Mode debug")
     args = parser.parse_args()

@@ -355,10 +355,13 @@ def generate_pdf_report(analysis: dict) -> bytes:
 
     # ── Table of contents ──
     story.append(Spacer(1, 15*mm))
-    has_mitre = bool((ai.get("mitre_techniques", []) if ai else []) or
-                     (ai.get("social_engineering_tactics", []) if ai else []) or
-                     classification.get("mitre_tactics") or
-                     analysis.get("impact_analysis", {}).get("mitre_attack"))
+    _mitre_check = ai.get("mitre_techniques", []) if ai else []
+    _tactics_check = ai.get("social_engineering_tactics", []) if ai else []
+    has_mitre = bool(
+        ([m for m in (_mitre_check if isinstance(_mitre_check, list) else []) if isinstance(m, dict)]) or
+        ([t for t in (_tactics_check if isinstance(_tactics_check, list) else []) if isinstance(t, dict)]) or
+        classification.get("mitre_tactics") or
+        analysis.get("impact_analysis", {}).get("mitre_attack"))
     has_whois = bool(analysis.get("whois", {}) and not analysis.get("whois", {}).get("error"))
     has_impact = bool(analysis.get("impact_analysis", {}).get("victim_scenario") or
                       analysis.get("impact_analysis", {}).get("business_impact"))
@@ -749,10 +752,15 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # §N. ANALYSE D'IMPACT — SCENARIO VICTIME
     # ════════════════════════════════════════════════════
     impact = analysis.get("impact_analysis", {})
+    impact = impact if isinstance(impact, dict) else {}
     victim_scenario = impact.get("victim_scenario", [])
+    victim_scenario = victim_scenario if isinstance(victim_scenario, list) else []
     business_impact_list = impact.get("business_impact", [])
+    business_impact_list = business_impact_list if isinstance(business_impact_list, list) else []
     impact_response = impact.get("response_actions", [])
+    impact_response = impact_response if isinstance(impact_response, list) else []
     attack_class = impact.get("attack_classification", {})
+    attack_class = attack_class if isinstance(attack_class, dict) else {}
 
     if victim_scenario or business_impact_list:
         story.append(PageBreak())
@@ -848,10 +856,13 @@ def generate_pdf_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════════════════
     # §N. MITRE ATT&CK MAPPING
     # ════════════════════════════════════════════════════
-    mitre = ai.get("mitre_techniques", []) if ai else []
-    tactics = ai.get("social_engineering_tactics", []) if ai else []
+    mitre_raw = ai.get("mitre_techniques", []) if ai else []
+    mitre = [m for m in (mitre_raw if isinstance(mitre_raw, list) else []) if isinstance(m, dict)]
+    tactics_raw = ai.get("social_engineering_tactics", []) if ai else []
+    tactics = [t for t in (tactics_raw if isinstance(tactics_raw, list) else []) if isinstance(t, dict)]
     # Merge MITRE from impact_analysis
-    impact_mitre = impact.get("mitre_attack", []) if impact else []
+    impact_mitre_raw = impact.get("mitre_attack", []) if impact else []
+    impact_mitre = [m for m in (impact_mitre_raw if isinstance(impact_mitre_raw, list) else []) if isinstance(m, dict)]
     if impact_mitre:
         existing_ids = {m.get("id") for m in mitre}
         for im in impact_mitre:
@@ -1557,10 +1568,15 @@ def generate_docx_report(analysis: dict) -> bytes:
     # N. ANALYSE D'IMPACT
     # ════════════════════════════════════════
     impact = analysis.get("impact_analysis", {})
+    impact = impact if isinstance(impact, dict) else {}
     victim_scenario = impact.get("victim_scenario", [])
+    victim_scenario = victim_scenario if isinstance(victim_scenario, list) else []
     business_impact_list = impact.get("business_impact", [])
+    business_impact_list = business_impact_list if isinstance(business_impact_list, list) else []
     impact_response = impact.get("response_actions", [])
+    impact_response = impact_response if isinstance(impact_response, list) else []
     attack_class = impact.get("attack_classification", {})
+    attack_class = attack_class if isinstance(attack_class, dict) else {}
 
     if victim_scenario or business_impact_list:
         doc.add_page_break()
@@ -1692,10 +1708,13 @@ def generate_docx_report(analysis: dict) -> bytes:
     # ════════════════════════════════════════
     # N. MITRE ATT&CK MAPPING
     # ════════════════════════════════════════
-    mitre = ai.get("mitre_techniques", []) if ai else []
-    tactics = ai.get("social_engineering_tactics", []) if ai else []
+    mitre_raw = ai.get("mitre_techniques", []) if ai else []
+    mitre = [m for m in (mitre_raw if isinstance(mitre_raw, list) else []) if isinstance(m, dict)]
+    tactics_raw = ai.get("social_engineering_tactics", []) if ai else []
+    tactics = [t for t in (tactics_raw if isinstance(tactics_raw, list) else []) if isinstance(t, dict)]
     # Merge MITRE from impact_analysis
-    impact_mitre = impact.get("mitre_attack", []) if impact else []
+    impact_mitre_raw = impact.get("mitre_attack", []) if impact else []
+    impact_mitre = [m for m in (impact_mitre_raw if isinstance(impact_mitre_raw, list) else []) if isinstance(m, dict)]
     if impact_mitre:
         existing_ids = {m.get("id") for m in mitre}
         for im in impact_mitre:

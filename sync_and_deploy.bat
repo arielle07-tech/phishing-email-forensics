@@ -11,7 +11,10 @@ xcopy /E /Y /I "C:\Users\Arielle Yao\Claude\Projects\Phishing Mail Forensics\doc
 xcopy /E /Y /I "C:\Users\Arielle Yao\Claude\Projects\Phishing Mail Forensics\Dockerfile" "D:\PhishingMail\"
 xcopy /E /Y /I "C:\Users\Arielle Yao\Claude\Projects\Phishing Mail Forensics\requirements.txt" "D:\PhishingMail\"
 xcopy /E /Y /I "C:\Users\Arielle Yao\Claude\Projects\Phishing Mail Forensics\dashboard.html" "D:\PhishingMail\"
-xcopy /Y "C:\Users\Arielle Yao\Claude\Projects\Phishing Mail Forensics\sync_and_deploy.bat" "D:\PhishingMail\"
+xcopy /E /Y /I "C:\Users\Arielle Yao\Claude\Projects\Phishing Mail Forensics\.env.example" "D:\PhishingMail\"
+xcopy /E /Y /I "C:\Users\Arielle Yao\Claude\Projects\Phishing Mail Forensics\.gitignore" "D:\PhishingMail\"
+xcopy /E /Y /I "C:\Users\Arielle Yao\Claude\Projects\Phishing Mail Forensics\samples" "D:\PhishingMail\samples"
+xcopy /E /Y /I "C:\Users\Arielle Yao\Claude\Projects\Phishing Mail Forensics\templates" "D:\PhishingMail\templates"
 
 echo.
 echo [2/4] Docker rebuild...
@@ -24,7 +27,7 @@ echo.
 echo [3/4] Git commit + push...
 cd /d D:\PhishingMail
 git add -A
-git commit -m "feat: enriched PDF/Word reports with Whois, impact analysis, sandbox screenshots, IP geo enrichment, merged MITRE"
+git commit -m "feat: Whois subdomain/PaaS detection, plain-language tickets, MITRE fallback inference, enriched PDF/Word reports, mbox-to-eml converter, dark mode only"
 git push
 
 echo.
